@@ -1,0 +1,14 @@
+[Unit]
+Description=Kurenie - povodny monitor (port 8099)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/kurenie
+Environment=PYTHONUNBUFFERED=1 TZ=Europe/Bratislava TC_DB=/opt/kurenie/tc.db TC_PORT=8099
+ExecStart=/usr/bin/python3 /opt/kurenie/monitor/web.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

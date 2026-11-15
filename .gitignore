@@ -1,0 +1,24 @@
+# tajomstvá a lokálna konfigurácia – NIKDY necommitovať
+config.env
+config.env.*
+!config.env.example
+cf_token
+cf_api
+vapid.json
+*.key
+*.pem
+
+# databázy a osobné dáta (spotreba, história)
+*.db
+*.db-shm
+*.db-wal
+ims_hourly.json
+backup/
+
+# zálohy pri nasadzovaní a dočasné súbory
+*.pred-*
+*.bak
+lead_*
+__pycache__/
+*.pyc
+*.log

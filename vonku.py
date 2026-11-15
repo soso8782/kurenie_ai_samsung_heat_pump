@@ -1,0 +1,326 @@
+﻿#!/usr/bin/env python3
+"""Teploty podľa vonkajšej teploty (SPEC_vonku.md): GET /api/vonku. Pre pásma vonkajšej teploty min/priemer/max v izbách a vo vode.
+Zdroj: stats.db, tabuľka hourly (hodinové priemery); otvára sa len na čítanie. Iba štandardná knižnica."""
+import bisect, datetime as _dt, math, sqlite3, time
+
+import stats
+from common import ROOM_NAMES
+
+KROKY = (1, 2, 3, 5)
+MIN_HODIN = 3
+IZBY = ["obyvacka", "detska", "jedalen", "kuchyna", "spalna", "pracovna", "kupelna", "chodba"]
+VODA = ["tw2", "tw1", "wl"]
+NAZVY = dict(ROOM_NAMES, chodba="Chodba", tw2="Voda výstup", tw1="Spiatočka", wl="Cieľ krivky")
+
+
+def _hours(cfg, a, b):
+    """Zoznam (ts, vonku, {stĺpec: hodnota}, kwh, beh_min) pre [a, b) kde vonku nie je NULL; pri chýbajúcej DB/stĺpcoch prázdny."""
+    try:
+        con = stats._ro(stats._db_path(cfg), stats._timeout(cfg))
+    except Exception:
+        return []
+    try:
+        have = {r[1] for r in con.execute("PRAGMA table_info(hourly)")}
+        if "vonku" not in have or "ts" not in have:
+            return []
+        sel = lambda c: c if c in have else "NULL"
+        cols = IZBY + VODA
+        if "kwh_cal" in have or "kwh" in have:
+            pump = "COALESCE(%s, %s)" % (sel("kwh_cal"), sel("kwh"))
+        else:
+            pump = "NULL"
+        q = "SELECT ts, vonku, %s, %s, %s FROM hourly WHERE vonku IS NOT NULL AND ts>=? AND ts<? ORDER BY ts" % (
+            ", ".join(sel(c) for c in cols), pump, sel("beh_min"))
+        rows = con.execute(q, (a, b)).fetchall()
+    except Exception:
+        return []
+    finally:
+        con.close()
+    n = len(IZBY) + len(VODA)
+    return [(r[0], r[1], dict(zip(cols, r[2:2 + n])), r[2 + n], r[3 + n]) for r in rows]
+
+
+def _r1(v):
+    return round(v + 0.0, 1)
+
+
+def _stat(vals):
+    """vals = [(ts, hodnota)] (vzostupne podľa ts) -> {min, avg, max, n, min_ts, max_ts} alebo None pri n < MIN_HODIN."""
+    if len(vals) < MIN_HODIN:
+        return None
+    mn = mx = vals[0]
+    s = 0.0
+    for t, v in vals:
+        s += v
+        if v <= mn[1]:
+            mn = (t, v)
+        if v >= mx[1]:
+            mx = (t, v)
+    return {"min": _r1(mn[1]), "avg": _r1(s / len(vals)), "max": _r1(mx[1]), "n": len(vals),
+            "min_ts": mn[0], "max_ts": mx[0]}
+
+
+def report(cfg, od=None, do=None, krok=2, now=None):
+    """Pásma vonkajšej teploty (krok °C) s min/avg/max izieb a vody. od/do = 'YYYY-MM-DD' vrátane; None = od najstaršieho záznamu
+    po dnes. Neplatný vstup vyhodí ValueError so slovenským textom."""
+    try:
+        krok = int(krok)
+    except (TypeError, ValueError):
+        raise ValueError("Krok musí byť 1, 2, 3 alebo 5 °C.")
+    if krok not in KROKY:
+        raise ValueError("Krok musí byť 1, 2, 3 alebo 5 °C.")
+    now = int(now or time.time())
+    today = _dt.date.fromtimestamp(now)
+    d0 = stats._pdate(od) if od else None
+    d1 = stats._pdate(do) if do else today
+    if d0 is not None and d1 < d0:
+        raise ValueError("Koniec obdobia je pred začiatkom.")
+    if d0 is None:
+        try:
+            con = stats._ro(stats._db_path(cfg), stats._timeout(cfg))
+            try:
+                m = con.execute("SELECT MIN(ts) FROM hourly WHERE vonku IS NOT NULL").fetchone()[0]
+            finally:
+                con.close()
+        except Exception:
+            m = None
+        d0 = _dt.date.fromtimestamp(m) if m is not None else d1
+        if d0 > d1:
+            d0 = d1
+    a = stats._midnight(d0)
+    b = stats._midnight(d1 + _dt.timedelta(days=1))
+    hrs = _hours(cfg, a, b)
+
+    bands = {}
+    for h in hrs:
+        bands.setdefault(int(math.floor(h[1] / krok)) * krok, []).append(h)
+
+    pasma, used = [], set()
+    for lo in sorted(bands):
+        hh = bands[lo]
+        if len(hh) < MIN_HODIN:
+            continue
+        p = {"od_c": lo, "do_c": lo + krok, "hodin": len(hh), "vonku_avg": _r1(sum(h[1] for h in hh) / len(hh))}
+        for c in IZBY + VODA:
+            st = _stat([(h[0], h[2][c]) for h in hh if h[2][c] is not None])
+            p[c] = st
+            if st:
+                used.add(c)
+        kw = [h[3] for h in hh if h[3] is not None]
+        p["kwh_h"] = round(sum(kw) / len(kw), 2) if len(kw) >= MIN_HODIN else None
+        bm = [h[4] for h in hh if h[4] is not None]
+        p["beh_pct"] = int(round(sum(bm) / len(bm) / 60.0 * 100)) if len(bm) >= MIN_HODIN else None
+        pasma.append(p)
+
+    stlpce = [{"key": c, "name": NAZVY[c], "skupina": "izba"} for c in IZBY if c in used]
+    stlpce += [{"key": c, "name": NAZVY[c], "skupina": "voda"} for c in VODA if c in used]
+    return {"od": d0.isoformat(), "do": d1.isoformat(), "krok": krok, "pasma": pasma, "stlpce": stlpce,
+            "hodin_spolu": sum(p["hodin"] for p in pasma),
+            "prvy_den": stats._dstr(hrs[0][0]) if hrs else None,
+            "posledny_den": stats._dstr(hrs[-1][0]) if hrs else None}
+
+
+# ---------------------------------------------------------------- SPEC_akokuri: na akú teplotu vody kúri čerpadlo pri akej vonkajšej teplote
+E_VONKU, E_TW2, E_TW1 = "Vonkajšia teplota", "Výstupná teplota vody (Tw2)", "Spiatočka (Tw1)"
+E_WL, E_FREQ, E_POSUN = "Cieľová ekvitermická voda (WL)", "Frekvencia kompresora", "Posun ekvitermickej krivky"
+NAST = [("fsv2011", "FSV 2011 Vonku najchladnejšie"), ("fsv2012", "FSV 2012 Vonku najteplejšie"),
+        ("fsv2021", "FSV 2021 WL1 voda pri najchladnejšom"), ("fsv2022", "FSV 2022 WL1 voda pri najteplejšom"),
+        ("fsv2031", "FSV 2031 WL2 voda pri najchladnejšom"), ("fsv2032", "FSV 2032 WL2 voda pri najteplejšom"),
+        ("fsv4013", "FSV 4013 Vypnutie kúrenia nad vonk. teplotou"), ("posun", E_POSUN),
+        ("max_posun_kladny", "Maximálny kladný posun krivky"), ("max_posun", "Maximálny posun krivky"),
+        ("zosilnenie", "Zosilnenie posunu krivky")]
+MIN_KURENIE = 30      # minút kúrenia v pásme
+ROZBEH = 10           # minút nepretržitého behu pred započítaním (aj po odmrazovaní)
+MAX_DNI = 400
+MAX_ZMIEN = 50
+
+
+def _pct(srt, p):
+    """Percentil (lineárna interpolácia) z vzostupne zoradeného zoznamu."""
+    k = (len(srt) - 1) * p / 100.0
+    i = int(math.floor(k))
+    j = min(i + 1, len(srt) - 1)
+    return srt[i] + (srt[j] - srt[i]) * (k - i)
+
+
+def _krivka(x, s):
+    """Voda podľa nastavenej krivky (bez posunu) pri vonkajšej teplote x; None pri chýbajúcich nastaveniach."""
+    try:
+        x1, x2, y1, y2 = s["fsv2011"], s["fsv2012"], s["fsv2031"], s["fsv2032"]
+    except KeyError:
+        return None
+    if None in (x1, x2, y1, y2):
+        return None
+    if x2 == x1:
+        return _r1(y1)
+    if x <= x1:
+        return _r1(y1)
+    if x >= x2:
+        return _r1(y2)
+    return _r1(y1 + (y2 - y1) * (x - x1) / (x2 - x1))
+
+
+def _blizky(pr, x):
+    """ts hodnoty z vzostupne zoradeného [(hodnota, ts)] najbližšej k x (pri zhode najstaršie ts)."""
+    i = bisect.bisect_left(pr, (x,))
+    best = None
+    for j in (i - 1, i):
+        if 0 <= j < len(pr):
+            v = pr[j][0]
+            j = bisect.bisect_left(pr, (v,))        # začiatok skupiny rovnakých hodnôt
+            c = (abs(v - x), pr[j][1])
+            if best is None or c < best:
+                best = c
+    return best[1]
+
+
+def _mm(vals):
+    """vals = [(hodnota, ts)] -> {min, avg, max} (5. a 95. percentil), pri min/max aj ts a krajné hodnoty; None pri prázdnom."""
+    if not vals:
+        return None
+    srt = sorted(v for v, _ in vals)
+    lo, hi = _pct(srt, 5), _pct(srt, 95)
+    pr = sorted(vals)
+    ts_lo, ts_hi = _blizky(pr, lo), _blizky(pr, hi)
+    return {"min": _r1(lo), "avg": _r1(sum(srt) / len(srt)), "max": _r1(hi), "min_ts": ts_lo, "max_ts": ts_hi,
+            "abs_min": _r1(srt[0]), "abs_max": _r1(srt[-1])}
+
+
+def _kurenie_prazdny(d0, d1, krok):
+    return {"od": d0.isoformat(), "do": d1.isoformat(), "krok": krok, "pasma": [],
+            "nastavenie": {k: None for k in ("fsv2011", "fsv2012", "fsv2031", "fsv2032", "fsv4013")},
+            "krivka_nastavenie": {k: None for k, _ in NAST}, "zmeny": [], "prva_vzorka": None, "minut_spolu": 0}
+
+
+def kurenie(cfg, od=None, do=None, krok=1, now=None):
+    """Pásma vonkajšej teploty s teplotou vody do radiátorov v minútach skutočného kúrenia (SPEC_akokuri.md).
+    Zdroj: tc.db (minútové vzorky + udalosti), otvára sa len na čítanie. Neplatný vstup = ValueError po slovensky."""
+    try:
+        krok = int(krok)
+    except (TypeError, ValueError):
+        raise ValueError("Krok musí byť 1, 2 alebo 5 °C.")
+    if krok not in (1, 2, 5):
+        raise ValueError("Krok musí byť 1, 2 alebo 5 °C.")
+    now = int(now or time.time())
+    today = _dt.date.fromtimestamp(now)
+    d0 = stats._pdate(od) if od else None
+    d1 = stats._pdate(do) if do else today
+    if d0 is not None and d1 < d0:
+        raise ValueError("Koniec obdobia je pred začiatkom.")
+    if d0 is not None and (d1 - d0).days + 1 > MAX_DNI:
+        raise ValueError("Obdobie je najviac %d dní." % MAX_DNI)
+    try:
+        tc = stats._tc(cfg)
+    except Exception:
+        return _kurenie_prazdny(d0 or d1, d1, krok)
+    try:
+        try:
+            first = tc.execute("SELECT MIN(ts) FROM samples").fetchone()[0]
+        except Exception:
+            first = None
+        if first is None:
+            return _kurenie_prazdny(d0 or d1, d1, krok)
+        if d0 is None:
+            d0 = min(_dt.date.fromtimestamp(first), d1)
+            if (d1 - d0).days + 1 > MAX_DNI:
+                d0 = d1 - _dt.timedelta(days=MAX_DNI - 1)
+        a = stats._midnight(d0)
+        b = stats._midnight(d1 + _dt.timedelta(days=1))
+        return _kurenie_calc(tc, d0, d1, krok, a, b, first)
+    except sqlite3.Error:
+        return _kurenie_prazdny(d0 or d1, d1, krok)
+    finally:
+        tc.close()
+
+
+def _kurenie_calc(tc, d0, d1, krok, a, b, first):
+    # nastavenia krivky: posledné hodnoty pred koncom rozsahu
+    nast = {}
+    for k, ent in NAST:
+        r = tc.execute("SELECT value FROM samples WHERE entity=? AND ts<? ORDER BY ts DESC LIMIT 1", (ent, b)).fetchone()
+        nast[k] = None if r is None or r[0] is None else float(r[0])
+    # minútové vzorky (s predstihom 15 min na dopĺňanie vonkajšej teploty a 10 min na rozbeh)
+    base = a // 60 - 15
+    n = (b + 59) // 60 - base
+    ents = [E_VONKU, E_TW2, E_TW1, E_WL, E_FREQ, E_POSUN]
+    arr = {e: [None] * n for e in ents}
+    sledovane = {ent for k, ent in NAST if k != "posun"}      # zmeny nastavení sa hľadajú v tom istom prechode
+    prev, zmeny = {}, []
+    q = "SELECT ts, entity, value FROM samples WHERE ts>=? AND ts<? AND entity IN (%s) ORDER BY ts" % ",".join("?" * (len(ents) + len(sledovane)))
+    for ts, ent, v in tc.execute(q, [base * 60, b] + ents + sorted(sledovane)):
+        if v is None:
+            continue
+        if ent in sledovane:
+            o = prev.get(ent)
+            if o is not None and v != o and ts >= a:
+                zmeny.append({"ts": ts, "nazov": ent, "old": _r1(o), "new": _r1(v)})
+            prev[ent] = v
+            continue
+        i = ts // 60 - base
+        if 0 <= i < n:
+            arr[ent][i] = float(v)
+    zmeny = zmeny[::-1][:MAX_ZMIEN]            # najnovšie prvé; pri rovnakom ts opačné poradie vstupu
+    valve, defr = stats._tracks(tc, base * 60, b)
+
+    bands = {}
+    run = 0
+    last_defr = None
+    last_v = last_vi = None
+    for i in range(n):
+        t = (base + i) * 60
+        vk = arr[E_VONKU][i]
+        if vk is not None:
+            last_v, last_vi = vk, i
+        fr = arr[E_FREQ][i]
+        run = run + 1 if (fr is not None and fr > 0) else 0
+        d = defr.at(t)
+        if d:
+            last_defr = i
+        if t < a or t >= b or last_v is None or i - last_vi > 15 or fr is None:
+            continue
+        vl = valve.at(t)
+        if vl == "tank" or d:
+            continue
+        lo = int(math.floor(last_v / krok)) * krok
+        bd = bands.get(lo)
+        if bd is None:
+            bd = bands[lo] = {"reg": 0, "beh": 0, "k": 0, "vsum": 0.0, "tw2": [], "tw1": [], "wl": [], "posun": []}
+        bd["reg"] += 1
+        if fr > 0:
+            bd["beh"] += 1
+        ps = arr[E_POSUN][i]
+        if ps is not None:
+            bd["posun"].append(ps)
+        if not (fr > 0 and vl == "room" and run >= ROZBEH + 1 and (last_defr is None or i - last_defr >= ROZBEH)):
+            continue
+        bd["k"] += 1
+        bd["vsum"] += last_v
+        for key, e in (("tw2", E_TW2), ("tw1", E_TW1), ("wl", E_WL)):
+            if arr[e][i] is not None:
+                bd[key].append((arr[e][i], t))
+
+    pasma = []
+    for lo in sorted(bands):
+        bd = bands[lo]
+        if bd["k"] < MIN_KURENIE:
+            continue
+        w = lambda key: _mm(bd[key])
+        tw1, wl = w("tw1"), w("wl")
+        for st in (tw1, wl):
+            if st:
+                for k in ("min_ts", "max_ts", "abs_min", "abs_max"):
+                    del st[k]
+        ps = bd["posun"]
+        f4013 = nast.get("fsv4013")
+        pasma.append({
+            "od_c": lo, "do_c": lo + krok, "minut_kurenia": bd["k"], "vonku_avg": _r1(bd["vsum"] / bd["k"]),
+            "tw2": w("tw2"), "tw1": tw1, "wl": wl,
+            "posun": {"min": _r1(min(ps)), "max": _r1(max(ps))} if ps else None,
+            "beh_pct": int(round(bd["beh"] * 100.0 / bd["reg"])) if bd["reg"] else None,
+            "krivka": _krivka(lo + krok / 2.0, nast),
+            "nad_vypnutim": bool(f4013 is not None and lo >= f4013)})
+    return {"od": d0.isoformat(), "do": d1.isoformat(), "krok": krok, "pasma": pasma,
+            "nastavenie": {k: nast[k] for k in ("fsv2011", "fsv2012", "fsv2031", "fsv2032", "fsv4013")},
+            "krivka_nastavenie": nast, "zmeny": zmeny, "prva_vzorka": stats._dstr(first),
+            "minut_spolu": sum(p["minut_kurenia"] for p in pasma)}
+

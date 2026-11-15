@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitoring TČ</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--fg:#1c1f24;--muted:#66707d;--line:#e3e6ea;--grid:#eceef1;
+  --c-room:#d9480f;--c-target:#2b8a3e;--c-wl:#7048e8;--c-tw2:#e8590c;--c-tw1:#1c7ed6;--c-out:#495057;
+  --c-shift:#0c8599;--c-freq:#c2255c;--c-power:#f59f00;--c-dhw:#9c36b5;--c-heat:#e03131;
+  --k-regulacia:#0c8599;--k-tarifa:#f08c00;--k-ovladanie:#1971c2;--k-nastavenie:#7048e8;--k-chyba:#e03131;--k-system:#868e96;--k-stav:#495057;--k-log:#495057;--k-analyza:#2b8a3e;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#111418;--card:#1a1e24;--fg:#e6e8eb;--muted:#9aa3ad;--line:#2b3139;--grid:#262b32;
+  --c-room:#ff8a4c;--c-target:#69db7c;--c-wl:#b197fc;--c-tw2:#ffa94d;--c-tw1:#74c0fc;--c-out:#ced4da;
+  --c-shift:#3bc9db;--c-freq:#f783ac;--c-power:#ffd43b;--c-dhw:#da77f2;--c-heat:#ff6b6b;
+  --k-regulacia:#3bc9db;--k-tarifa:#ffc078;--k-ovladanie:#74c0fc;--k-nastavenie:#b197fc;--k-chyba:#ff6b6b;--k-system:#adb5bd;--k-stav:#ced4da;--k-log:#ced4da;--k-analyza:#69db7c;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:20px 16px 8px;max-width:1200px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:17px;margin:0 0 10px}
+.sub{color:var(--muted);font-size:13px}
+main{max-width:1200px;margin:0 auto;padding:0 16px 40px}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0}
+.bar button{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.bar button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:8px 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.card .l{color:var(--muted);font-size:12px}
+.card .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .d{color:var(--muted);font-size:12px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 14px}
+.chart{position:relative;height:260px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:860px){.grid2{grid-template-columns:1fr}}
+.note{border-left:3px solid var(--k-analyza);padding:4px 0 4px 12px;margin:0 0 14px}
+.note .t{font-weight:600}
+.note .m{color:var(--muted);font-size:12px}
+.note .b{white-space:pre-wrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer;user-select:none;background:var(--card)}
+.chip.off{opacity:.4}
+.chip i,.ev i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.evs{max-height:520px;overflow:auto}
+.ev{display:grid;grid-template-columns:120px 1fr;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
+.ev .tm{color:var(--muted);font-variant-numeric:tabular-nums}
+.ev .x{overflow-wrap:anywhere}
+.ev .x b{font-weight:600}
+dl{margin:0}dt{font-weight:600;margin-top:10px}dd{margin:2px 0 0;color:var(--muted)}
+.empty{color:var(--muted);font-size:14px}
+h3{font-size:15px;margin:18px 0 8px}
+.th{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.tw.tall{max-height:460px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:5px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{position:sticky;top:0;background:var(--card);color:var(--muted);font-weight:600}
+td.l,th.l{text-align:left}
+tr.short td{background:color-mix(in srgb,var(--k-tarifa) 12%,transparent)}
+tr.hot td{background:color-mix(in srgb,var(--k-chyba) 12%,transparent)}
+.badge{display:inline-block;padding:1px 7px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
+@media print{
+  body{background:#fff;color:#000}
+  body.ptech main>*:not(#tech),body.ptech #range,body.ptech .bar{display:none!important}
+  .panel{border:none;padding:0}.tw,.tw.tall{max-height:none;overflow:visible;border:none}
+  th{position:static}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Monitoring tepelného čerpadla</h1>
+  <div class="sub" id="status">Načítavam…</div>
+</header>
+<main>
+  <div class="bar" id="range">
+    <button data-h="3">3 h</button><button data-h="6">6 h</button><button data-h="12">12 h</button>
+    <button data-h="24" class="on">24 h</button><button data-h="48">48 h</button><button data-h="0">Všetko</button>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <section class="panel" id="tech">
+    <div class="th">
+      <h2>Technická správa pre servis</h2>
+      <div class="bar" style="margin:0">
+        <button id="btnPrint">Tlačiť / PDF</button><button id="btnCsv">Cykly ako CSV</button>
+      </div>
+    </div>
+    <div class="sub" id="techHead"></div>
+    <h3>Súhrn chodu kompresora</h3>
+    <div class="cards" id="techCards"></div>
+    <h3>Obdobia cyklovania <span class="sub">(≥ 4 štarty v kĺzavej hodine)</span></h3>
+    <div class="tw"><table id="tEpis"></table></div>
+    <h3>Hodinový prehľad</h3>
+    <div class="tw"><table id="tHours"></table></div>
+    <h3>Jednotlivé cykly kompresora <span class="sub">(najnovšie hore)</span></h3>
+    <div class="tw tall"><table id="tCycles"></table></div>
+    <h3>Nastavenia TČ a regulácie</h3>
+    <div class="tw"><table id="tSet"></table></div>
+    <p class="sub">Dôvod zastavenia sa určuje podľa stavu v okamihu zastavenia: odmrazovanie (0x402E / ODU Deice), vypnutie prepínačmi (drahá tarifa), termostat OFF (0x4028 – voda dosiahla cieľ podľa krivky), ochrana vonkajšej jednotky (ODU režim 0x8001 Safety/Comp Down/Prohibit). Cykly pred 7.11. 16:05 sú odvodené z 1–2-minútových vzoriek (bez dôvodu), novšie z presných udalostí. Príkon je odhad z prúdu CT1, nie meranie.</p>
+  </section>
+
+  <section class="panel" id="notesPanel">
+    <h2>Analýzy a závery</h2>
+    <div id="notes"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Detská izba – teplota a cieľ</h2>
+    <div class="chart"><canvas id="chRoom"></canvas></div>
+  </section>
+
+  <section class="panel" id="cmp">
+    <div class="th">
+      <h2>Teraz vs. včera v rovnakom čase</h2>
+      <div class="bar" style="margin:0" id="cmpSpan">
+        <button data-m="30">30 min</button><button data-m="60" class="on">1 h</button><button data-m="180">3 h</button>
+      </div>
+    </div>
+    <div class="sub" id="cmpHead"></div>
+    <div class="cards" id="cmpCards"></div>
+    <div class="tw"><table id="tCmp"></table></div>
+    <h3>Priebeh dnes a včera <select id="cmpSel" style="font:inherit;margin-left:8px"></select></h3>
+    <div class="chart"><canvas id="chCmp"></canvas></div>
+    <p class="sub">Hodnoty „teraz“ sú priemer za zvolené okno pred aktuálnym časom; „včera“ je rovnaké okno presne o 24 h skôr. „Od polnoci“ porovnáva dnešok do teraz so včerajškom do rovnakého času. Zdroj ESP = minútové merania monitoringu, HA = hodinové priemery z Home Assistant (doplnené tam, kde monitoring nemá dáta). Spotreba je odhad z prúdu kompresora.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Teploty izieb <span class="sub">(z Home Assistant, od 8.11. 16:54)</span></h2>
+    <div class="chart"><canvas id="chRooms"></canvas></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Voda a vonkajšia teplota</h2>
+      <div class="chart"><canvas id="chWater"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>Posun krivky a prepínače</h2>
+      <div class="chart"><canvas id="chShift"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>Kompresor a príkon</h2>
+      <div class="chart"><canvas id="chComp"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>Teplá úžitková voda</h2>
+      <div class="chart"><canvas id="chDhw"></canvas></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Časová os udalostí</h2>
+    <div class="chips" id="chips"></div>
+    <div class="evs" id="events"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Čo znamenajú hodnoty</h2>
+    <dl>
+      <dt>Detská izba / cieľ</dt><dd>Teplota z hlavice v detskej (cez Home Assistant) a platná cieľová teplota – pevná alebo z časového plánu. Hlavica hlási hodnotu len pri zmene, preto krivka ide v schodoch.</dd>
+      <dt>Posun krivky</dt><dd>O koľko °C ESP posúva ekvitermickú krivku TČ (0 = normálna krivka, −5 až +2). Izba nad cieľom → posun nadol hneď; izba dlhšie mimo cieľa → každých 30 min ďalších ±0,5 °C (doťahovanie), takže sa ustáli presne na cieli. Kladný posun = teplejšia voda, keď je izba dlhšie pod cieľom.</dd>
+      <dt>WL – cieľová voda</dt><dd>Teplota vody, ktorú TČ chce podľa krivky (WL2: 50 °C pri −15 °C vonku, 30 °C pri +15 °C) vrátane posunu.</dd>
+      <dt>Tw2 / Tw1</dt><dd>Skutočná výstupná voda do radiátorov a spiatočka. Rozdiel (delta T) ukazuje, koľko tepla dom odoberá.</dd>
+      <dt>Frekvencia kompresora</dt><dd>Výkon kompresora. 0 Hz = stojí. Krátke cykly (veľa štartov za hodinu) znamenajú, že dom potrebuje menej tepla, než TČ dodá na minime.</dd>
+      <dt>Štarty / h</dt><dd>Koľkokrát sa kompresor rozbehol za hodinu (z 1-minútových vzoriek). Ideálne do 3–4 za hodinu.</dd>
+      <dt>Príkon / spotreba</dt><dd>Odhad z prúdu kompresora (CT1 × 230 V × 3 × 0,9). Nie je overený elektromerom – berte ho orientačne.</dd>
+      <dt>Kúrenie / Ohrev TÚV</dt><dd>Prepínače TČ. Vypína ich drahá tarifa (08–09, 18–19 h) a v režime vypínania aj izbová regulácia / hybrid.</dd>
+      <dt>Udalosti</dt><dd><b>Regulácia</b> – zásahy izbovej regulácie; <b>Tarifa</b> – začiatok/koniec drahej tarify; <b>Ovládanie</b> – prepínače, režimy, 3-cestný ventil; <b>Nastavenie</b> – zmeny nastavení; <b>Chyba</b> – chybové hlásenia; <b>Systém</b> – dostupnosť ESP a zberača.</dd>
+    </dl>
+  </section>
+</main>
+
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const KIND = {regulacia:"Regulácia",tarifa:"Tarifa",ovladanie:"Ovládanie",nastavenie:"Nastavenie",chyba:"Chyba",system:"Systém",stav:"Stav",log:"Log",analyza:"Analýza"};
+let hours = 24, charts = {}, hidden = new Set(["stav"]), last = null;
+try { const s = localStorage.getItem("tc_hidden"); if (s) hidden = new Set(JSON.parse(s)); } catch(e) {}
+try { const h = localStorage.getItem("tc_hours"); if (h !== null) hours = +h; } catch(e) {}
+
+const fmtT = ts => new Date(ts*1000).toLocaleString("sk-SK",{weekday:"short",hour:"2-digit",minute:"2-digit"});
+const fmtD = ts => new Date(ts*1000).toLocaleString("sk-SK",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"});
+const pts = a => (a||[]).map(([t,v]) => ({x:t*1000,y:v}));
+const lastv = a => a && a.length ? a[a.length-1][1] : null;
+const f1 = v => v==null ? "–" : v.toFixed(1);
+
+function baseOpts(y1, y2) {
+  const g = css("--grid"), m = css("--muted");
+  const o = {responsive:true, maintainAspectRatio:false, animation:false, parsing:false, normalized:true,
+    interaction:{mode:"index",intersect:false},
+    plugins:{legend:{labels:{color:m,boxWidth:12}}, tooltip:{callbacks:{title:i=>fmtD(i[0].parsed.x/1000)}}},
+    elements:{point:{radius:0},line:{borderWidth:2}},
+    scales:{x:{type:"time",time:{displayFormats:{hour:"HH:mm",minute:"HH:mm",day:"d.M."}},grid:{color:g},ticks:{color:m,maxRotation:0}},
+            y:{title:{display:true,text:y1,color:m},grid:{color:g},ticks:{color:m}}}};
+  if (y2) o.scales.y2 = {position:"right",title:{display:true,text:y2,color:m},grid:{display:false},ticks:{color:m}};
+  return o;
+}
+function ds(label, data, color, extra={}) { return {label, data, borderColor:color, backgroundColor:color, ...extra}; }
+function draw(id, datasets, y1, y2, mod) {
+  const o = baseOpts(y1, y2); if (mod) mod(o);
+  if (charts[id]) { charts[id].data.datasets = datasets; charts[id].options = o; charts[id].update("none"); return; }
+  charts[id] = new Chart(document.getElementById(id), {type:"line", data:{datasets}, options:o});
+}
+
+function stats(d) {
+  const s = d.series, room = s.detska, tgt = s.ciel, fr = s.freq;
+  const out = {};
+  const rv = room.map(p=>p[1]);
+  if (rv.length) { out.rmin = Math.min(...rv); out.rmax = Math.max(...rv); out.ravg = rv.reduce((a,b)=>a+b,0)/rv.length; }
+  // čas nad cieľom (+0,2 °C) - párovanie podľa času
+  if (room.length && tgt.length) {
+    const tm = new Map(tgt.map(p=>[p[0],p[1]])); let n=0, over=0;
+    for (const [t,v] of room) { const c = tm.get(t); if (c!=null) { n++; if (v > c + 0.2) over++; } }
+    out.over = n ? over/n*100 : null;
+  }
+  if (fr.length) {
+    let run=0, starts=0;
+    for (let i=0;i<fr.length;i++) { if (fr[i][1]>0) run++; if (i && fr[i-1][1]===0 && fr[i][1]>0) starts++; }
+    const hrs = (fr[fr.length-1][0]-fr[0][0])/3600;
+    out.run = run/fr.length*100; out.starts = starts; out.sph = hrs>0.2 ? starts/hrs : null;
+  }
+  // spotreba - súčet prírastkov dennej spotreby (o polnoci sa nuluje)
+  const sp = s.spotreba; let kwh = 0;
+  for (let i=1;i<sp.length;i++) { const dlt = sp[i][1]-sp[i-1][1]; kwh += dlt >= 0 ? dlt : sp[i][1]; }
+  out.kwh = sp.length>1 ? kwh : null;
+  const ps = s.posun.map(p=>p[1]); if (ps.length) out.pavg = ps.reduce((a,b)=>a+b,0)/ps.length;
+  out.nreg = d.events.filter(e=>e.kind==="regulacia" && e.entity!=="Stav izbovej regulácie").length;
+  out.nerr = d.events.filter(e=>e.kind==="chyba").length;
+  return out;
+}
+
+function cards(d) {
+  const s = d.series, st = stats(d);
+  const c = [
+    ["Detská teraz", f1(lastv(s.detska))+" °C", "cieľ "+f1(lastv(s.ciel))+" °C"],
+    ["Detská min / max", f1(st.rmin)+" / "+f1(st.rmax), "priemer "+f1(st.ravg)+" °C"],
+    ["Čas nad cieľom", st.over==null?"–":st.over.toFixed(0)+" %", "viac ako +0,2 °C"],
+    ["Posun krivky", f1(lastv(s.posun))+" °C", "priemer "+f1(st.pavg)],
+    ["Vonku", f1(lastv(s.vonku))+" °C", "WL "+f1(lastv(s.wl))+" · Tw2 "+f1(lastv(s.tw2))],
+    ["Kompresor", lastv(s.freq)==null?"–":lastv(s.freq).toFixed(0)+" Hz", st.run==null?"":"beží "+st.run.toFixed(0)+" % času"],
+    ["Štarty kompresora", st.starts==null?"–":String(st.starts), st.sph==null?"":st.sph.toFixed(1)+" za hodinu"],
+    ["Spotreba (odhad)", st.kwh==null?"–":st.kwh.toFixed(1)+" kWh", "za zobrazené obdobie"],
+    ["Zásahy regulácie", String(st.nreg), st.nerr ? st.nerr+" chýb!" : "bez chýb"],
+  ];
+  document.getElementById("cards").innerHTML = c.map(([l,v,dd])=>`<div class="card"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${dd}</div></div>`).join("");
+}
+
+function charts_(d) {
+  const s = d.series;
+  draw("chRoom", [ds("Detská izba", pts(s.detska), css("--c-room"), {stepped:true}),
+                  ds("Cieľ", pts(s.ciel), css("--c-target"), {stepped:true, borderDash:[6,4]})], "°C");
+  draw("chRooms", [ds("Jedáleň", pts(s.r_jedalen), "#e8590c", {stepped:true, borderWidth:2.5}),
+                   ds("Jedáleň – radiátor", pts(s.r_jedalen_rad), "#e8590c", {stepped:true, borderWidth:1, borderDash:[5,4]}),
+                   ds("Obývačka", pts(s.r_obyvacka), "#1c7ed6", {stepped:true}),
+                   ds("Detská (Zigbee)", pts(s.r_detska), "#d6336c", {stepped:true}),
+                   ds("Kúpeľňa", pts(s.r_kupelna), "#0ca678", {stepped:true}),
+                   ds("Spálňa", pts(s.r_spalna), "#7048e8", {stepped:true}),
+                   ds("Pracovňa", pts(s.r_pracovna), "#868e96", {stepped:true}),
+                   ds("Kuchyňa", pts(s.r_kuchyna), "#f59f00", {stepped:true})], "°C");
+  draw("chWater", [ds("WL cieľová voda", pts(s.wl), css("--c-wl")), ds("Tw2 výstup", pts(s.tw2), css("--c-tw2")),
+                   ds("Tw1 spiatočka", pts(s.tw1), css("--c-tw1")),
+                   ds("Vonku", pts(s.vonku), css("--c-out"), {yAxisID:"y2", borderDash:[4,3]})], "voda °C", "vonku °C");
+  const now = d.now*1000, ext = a => a.length ? [...pts(a), {x:now, y:a[a.length-1][1]}] : [];
+  draw("chShift", [ds("Posun krivky", pts(s.posun), css("--c-shift"), {stepped:true}),
+                   ds("Kúrenie zap.", ext(d.switches.kurenie), css("--c-heat"), {stepped:true, yAxisID:"y2", borderWidth:1.5}),
+                   ds("TÚV zap.", ext(d.switches.tuv), css("--c-dhw"), {stepped:true, yAxisID:"y2", borderWidth:1.5, borderDash:[4,3]})],
+       "posun °C", "zap/vyp", o => { o.scales.y.suggestedMin=-5; o.scales.y.suggestedMax=0.5;
+         o.scales.y2.min=-0.1; o.scales.y2.max=1.1; o.scales.y2.ticks.stepSize=1; o.scales.y2.ticks.callback=v=>v===1?"ZAP":v===0?"VYP":""; });
+  draw("chComp", [ds("Frekvencia", pts(s.freq), css("--c-freq"), {stepped:true}),
+                  ds("Príkon (odhad)", pts(s.prikon), css("--c-power"), {yAxisID:"y2", borderWidth:1.5})], "Hz", "W");
+  draw("chDhw", [ds("Bojler TÚV", pts(s.bojler), css("--c-dhw")),
+                 ds("Tw2 výstup", pts(s.tw2), css("--c-tw2"), {borderWidth:1})], "°C");
+}
+
+function eventsUI(d) {
+  const kinds = [...new Set(d.events.map(e=>e.kind))].sort();
+  document.getElementById("chips").innerHTML = kinds.map(k => {
+    const n = d.events.filter(e=>e.kind===k).length;
+    return `<span class="chip ${hidden.has(k)?"off":""}" data-k="${k}"><i style="background:${css("--k-"+k)||css("--muted")}"></i>${KIND[k]||k} (${n})</span>`;
+  }).join("");
+  const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  const rows = d.events.filter(e=>!hidden.has(e.kind)).map(e => {
+    const txt = e.text ? esc(e.text) : e.old == null ? `<b>${esc(e.entity)}</b>: počiatočný stav ${esc(e.new)}`
+                                      : `<b>${esc(e.entity)}</b>: ${esc(e.old)} → ${esc(e.new)}`;
+    return `<div class="ev"><div class="tm"><i style="background:${css("--k-"+e.kind)||css("--muted")}"></i>${fmtD(e.ts)}</div><div class="x">${txt}</div></div>`;
+  });
+  document.getElementById("events").innerHTML = rows.length ? rows.join("") : `<div class="empty">Žiadne udalosti v tomto období.</div>`;
+}
+
+function notesUI(d) {
+  const esc = t => String(t ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  document.getElementById("notes").innerHTML = d.notes.length
+    ? d.notes.map(n=>`<div class="note"><div class="t">${esc(n.title)}</div><div class="m">${fmtD(n.ts)} · ${esc(n.author)}</div><div class="b">${esc(n.body)}</div></div>`).join("")
+    : `<div class="empty">Zatiaľ bez analýzy – prvá pribudne po niekoľkých hodinách zberu.</div>`;
+}
+
+function statusUI(d) {
+  const ls = +(d.meta.last_sample||0), age = d.now - ls, end = +(d.meta.end||0), start = +(d.meta.start||0);
+  let t = ls ? `Posledné meranie ${fmtT(ls)}` + (age > 180 ? ` – POZOR, ${Math.round(age/60)} min bez nových dát` : "") : "Zatiaľ bez meraní";
+  if (start) t += ` · zber od ${fmtD(start)}`;
+  if (end) t += d.now < end ? ` do ${fmtD(end)}` : ` – ukončený ${fmtD(end)}`;
+  document.getElementById("status").textContent = t + " · obnovuje sa každú minútu";
+}
+
+let lastTech = null;
+const n1 = v => v==null ? "–" : (+v).toFixed(1);
+const tm = ts => ts ? new Date(ts*1000).toLocaleString("sk-SK",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"}) : "–";
+const escH = t => String(t ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function table(id, head, rows, cls) {
+  const h = "<tr>" + head.map(([t,l])=>`<th class="${l?"l":""}">${t}</th>`).join("") + "</tr>";
+  document.getElementById(id).innerHTML = h + (rows.length ? rows.map((r,i)=>`<tr class="${cls?cls(i):""}">` + r.map((c,j)=>`<td class="${head[j][1]?"l":""}">${c}</td>`).join("") + "</tr>").join("")
+    : `<tr><td class="l" colspan="${head.length}">Žiadne záznamy v tomto období.</td></tr>`);
+}
+function techUI(t) {
+  const s = t.summary;
+  document.getElementById("techHead").textContent =
+    `Obdobie ${tm(t.since || (t.hourly[0]||{}).hod)} – ${tm(t.now)} (${s.hodin} h). Samsung EHS: vonk. AE120JXEDGH, hydrobox AE160JNYDGH. Režim kúrenia: ${t.settings["Režim kúrenia"]||"?"}, krivka ${t.settings["FSV 2041 Typ krivky WL1 alebo WL2"]||"?"}.`;
+  const dv = Object.entries(s.dovody||{}).map(([k,v])=>`${v}× ${k}`).join(", ") || "–";
+  document.getElementById("techCards").innerHTML = [
+    ["Štarty kompresora", s.starty, s.za_hod==null?"":s.za_hod+" za hodinu"],
+    ["Priemerný chod", s.chod_avg==null?"–":s.chod_avg+" min", "najkratší "+(s.chod_min??"–")+" min"],
+    ["Krátke cykly", s.kratke, "chod kratší ako 10 min"],
+    ["Odmrazovania", s.odmraz, "počas cyklov"],
+    ["Dôvody zastavenia", "", dv],
+  ].map(([l,v,d])=>`<div class="card"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${escH(d)}</div></div>`).join("");
+  table("tEpis", [["Od",1],["Do",1],["Štarty"],["Za hod."],["Ø chod min"],["Ø pauza min"],["Ø vonku °C"],["Dôvody zastavenia",1]],
+    t.episodes.map(e=>[tm(e.od), tm(e.do), e.starty, e.za_hod, n1(e.chod_avg), n1(e.pauza_avg), n1(e.vonku), escH(e.dovody.join(", "))]));
+  table("tHours", [["Hodina",1],["Vonku °C"],["Beh %"],["Štarty"],["Ø Hz"],["WL °C"],["Tw2 °C"],["Tw1 °C"],["ΔT"],["Izba °C"],["Posun"]],
+    t.hourly.slice().reverse().map(h=>[tm(h.hod), n1(h.vonku), h.beh_pct, h.starty, n1(h.f_avg), n1(h.wl), n1(h.tw2), n1(h.tw1),
+      h.tw2!=null&&h.tw1!=null ? n1(h.tw2-h.tw1) : "–", n1(h.detska), n1(h.posun)]),
+    i => { const h = t.hourly.slice().reverse()[i]; return h.starty >= 4 ? "short" : ""; });
+  table("tCycles", [["Štart",1],["Stop",1],["Chod min"],["Pauza pred"],["max Hz"],["Ø Hz"],["Vonku"],["WL"],["Tw2 štart→stop"],["Tw1"],["Izba"],["Posun"],["Ventil",1],["ODU režim",1],["Dôvod zastavenia",1],["Zdroj",1]],
+    t.cycles.map(c=>[tm(c.start), c.stop?tm(c.stop):'<span class="badge">beží</span>', n1(c.chod_min), n1(c.pauza_pred_min), c.f_max??"–", n1(c.f_avg),
+      n1(c.vonku), n1(c.wl), `${n1(c.tw2_start)} → ${n1(c.tw2_stop)}`, n1(c.tw1_start), n1(c.detska), n1(c.posun),
+      escH(c.ventil||"–"), escH(c.odu||"–"), escH(c.dovod) + (c.odmraz?' <span class="badge">odmraz.</span>':""), escH(c.zdroj)]),
+    i => { const c = t.cycles[i]; return c.dovod.startsWith("ochrana") ? "hot" : (c.stop && c.chod_min < 10 ? "short" : ""); });
+  table("tSet", [["Parameter",1],["Hodnota",1]], Object.entries(t.settings).map(([k,v])=>[escH(k), escH(v)]));
+}
+function csvCycles() {
+  if (!lastTech) return;
+  const cols = ["start","stop","chod_min","pauza_pred_min","f_max","f_avg","vonku","wl","tw2_start","tw2_stop","tw1_start","detska","posun","ventil","odu","odmraz","dovod","zdroj"];
+  const iso = ts => ts ? new Date(ts*1000).toLocaleString("sk-SK") : "";
+  const lines = [cols.join(";")].concat(lastTech.cycles.slice().reverse().map(c => cols.map(k =>
+    (k==="start"||k==="stop") ? iso(c[k]) : String(c[k] ?? "").replace(/;/g, ",").replace(".", ",")).join(";")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], {type:"text/csv"}));
+  a.download = "cykly_kompresora.csv"; a.click();
+}
+document.getElementById("btnCsv").addEventListener("click", csvCycles);
+document.getElementById("btnPrint").addEventListener("click", () => {
+  document.body.classList.add("ptech"); window.print(); setTimeout(()=>document.body.classList.remove("ptech"), 500);
+});
+
+let cmpSpan = 60, cmpK = 1;
+try { const k = localStorage.getItem("tc_cmpk"); if (k !== null) cmpK = +k; } catch(e) {}
+function cmpUI(c) {
+  const fmt = (v,u) => v==null ? "–" : (u==="W" ? Math.round(v)+" W" : (+v).toFixed(u==="Hz"?0:1)+" "+u);
+  const dif = (a,b,u) => (a==null||b==null) ? "–" : ((a-b>=0?"+":"") + (u==="W" ? Math.round(a-b) : (a-b).toFixed(1)));
+  const tnow = new Date(c.now*1000).toLocaleString("sk-SK",{weekday:"short",hour:"2-digit",minute:"2-digit"});
+  const ty = new Date((c.now-86400)*1000).toLocaleString("sk-SK",{weekday:"short",hour:"2-digit",minute:"2-digit"});
+  document.getElementById("cmpHead").textContent = `Teraz: ${tnow} · Včera: ${ty} · okno ${c.span_min} min`;
+  const e = c.energia, k = c.kompresor;
+  const ks = s => s ? `${s.beh.toFixed(0)} % chodu, ${s.starty} štartov` : "–";
+  document.getElementById("cmpCards").innerHTML = [
+    ["Spotreba od polnoci (odhad)", e.teraz==null?"–":e.teraz.toFixed(1)+" kWh", "včera do rovnakého času: " + (e.vcera==null?"–":e.vcera.toFixed(1)+" kWh")],
+    ["Kompresor od polnoci", ks(k.den_teraz), "včera: " + ks(k.den_vcera)],
+    ["Kompresor posledné 3 h", ks(k.h_teraz), "včera: " + ks(k.h_vcera)],
+  ].map(([l,v,d])=>`<div class="card"><div class="l">${l}</div><div class="v" style="font-size:17px">${v}</div><div class="d">${d}</div></div>`).join("");
+  table("tCmp", [["Veličina",1],["Teraz"],["Včera"],["Rozdiel"],["Od polnoci dnes"],["Včera do rovn. času"],["Rozdiel"],["Zdroj včera",1]],
+    c.rows.map(r=>[escH(r.label), fmt(r.teraz,r.unit), fmt(r.vcera,r.unit), dif(r.teraz,r.vcera,r.unit),
+      fmt(r.den_teraz,r.unit), fmt(r.den_vcera,r.unit), dif(r.den_teraz,r.den_vcera,r.unit), escH(r.zdroj_vcera||r.zdroj_den_vcera||"bez dát")]));
+  const sel = document.getElementById("cmpSel");
+  if (!sel.options.length) { sel.innerHTML = c.labels.map((l,i)=>`<option value="${i}">${escH(l)}</option>`).join(""); }
+  sel.value = String(cmpK);
+  draw("chCmp", [ds("Dnes", pts(c.overlay.dnes), css("--c-room"), {borderWidth:2.5}),
+                 ds("Včera (posunuté o 24 h)", pts(c.overlay.vcera), css("--muted"), {borderDash:[6,4]})], c.overlay_label);
+}
+document.getElementById("cmpSpan").addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return; cmpSpan = +b.dataset.m;
+  document.querySelectorAll("#cmpSpan button").forEach(x=>x.classList.toggle("on", x===b)); load();
+});
+document.getElementById("cmpSel").addEventListener("change", ev => {
+  cmpK = +ev.target.value; try { localStorage.setItem("tc_cmpk", cmpK); } catch(_) {} load();
+});
+
+async function load() {
+  try {
+    const [r, rt, rc] = await Promise.all([fetch("api/data?h="+hours, {cache:"no-store"}), fetch("api/tech?h="+hours, {cache:"no-store"}),
+                                           fetch(`api/compare?m=${cmpSpan}&k=${cmpK}`, {cache:"no-store"})]);
+    last = await r.json(); lastTech = await rt.json(); const lc = await rc.json();
+    statusUI(last); cards(last); cmpUI(lc); techUI(lastTech); notesUI(last); charts_(last); eventsUI(last);
+  } catch(e) { document.getElementById("status").textContent = "Chyba načítania: " + e; }
+}
+document.getElementById("range").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  hours = +b.dataset.h; try { localStorage.setItem("tc_hours", hours); } catch(_) {}
+  document.querySelectorAll("#range button").forEach(x=>x.classList.toggle("on", x===b)); load();
+});
+document.getElementById("chips").addEventListener("click", e => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  const k = c.dataset.k; hidden.has(k) ? hidden.delete(k) : hidden.add(k);
+  try { localStorage.setItem("tc_hidden", JSON.stringify([...hidden])); } catch(_) {}
+  if (last) eventsUI(last);
+});
+document.querySelectorAll("#range button").forEach(x=>x.classList.toggle("on", +x.dataset.h===hours));
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>

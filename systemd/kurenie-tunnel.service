@@ -1,0 +1,13 @@
+[Unit]
+Description=Kurenie - Cloudflare tunel
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/kurenie/cf_token
+
+[Service]
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --token-file /opt/kurenie/cf_token
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

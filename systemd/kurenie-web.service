@@ -1,0 +1,14 @@
+[Unit]
+Description=Kurenie - web agenta (port 80)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/kurenie
+Environment=PYTHONUNBUFFERED=1 TZ=Europe/Bratislava 
+ExecStart=/usr/bin/python3 /opt/kurenie/app.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

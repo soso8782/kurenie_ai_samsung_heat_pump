@@ -1,0 +1,6 @@
+[Unit]
+Description=Kurenie - denna zaloha databaz
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/kurenie/backup.sh

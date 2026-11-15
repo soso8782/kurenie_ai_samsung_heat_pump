@@ -1,0 +1,14 @@
+[Unit]
+Description=Kurenie - zberac dat z ESP m5stack-tc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/kurenie
+Environment=PYTHONUNBUFFERED=1 TZ=Europe/Bratislava TC_DB=/opt/kurenie/tc.db TC_END=0
+ExecStart=/usr/bin/python3 /opt/kurenie/collector.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
