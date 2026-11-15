@@ -2,6 +2,12 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] – 2026-11-15
+
+### Pridané
+- Prehľad: riadok s typom tepelného čerpadla z profilu (názov, Split/Mono, výkon, fázy, chladivo, typ kúrenia, TÚV, model
+  a či sa COP počíta z overenej tabuľky výrobcu); správca sa z neho preklikne do Nastavení. `/api/status` → `profil_info.zariadenie_info`.
+
 ## [2.1.0] – 2026-11-15
 
 ### Pridané
@@ -56,6 +62,7 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.1.1]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.1.1
 [2.1.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.1.0
 [2.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.0.0
 [1.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v1.0.0

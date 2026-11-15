@@ -305,6 +305,10 @@ footer{color:var(--mut);font-size:12.5px;padding-bottom:36px;display:flex;justif
 .iv-h{display:flex;flex-wrap:wrap;gap:5px 9px;align-items:center;font-size:13px;color:var(--ink-2)}
 .iv-t{font-size:14.5px;white-space:pre-wrap;overflow-wrap:anywhere}
 .iv-v{font-size:14px;color:var(--ink-2)}
+.devline{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.devline .dn{font-size:13.5px;font-weight:600;color:var(--ink);margin-right:4px;min-width:0;overflow-wrap:anywhere}
+.devline .tag{white-space:nowrap}
+.devline a.tag{text-decoration:none}.devline a.tag:hover{color:var(--ink);background:var(--line)}
 .tag{display:inline-block;border:1px solid var(--line-2);border-radius:999px;padding:0 9px;font-size:12px;line-height:20px;color:var(--ink-2)}
 .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 table.cmp{font-size:13px}
@@ -650,6 +654,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
         </div>
       </div>
       <div class="scale" id="scale" aria-label="Teploty izieb na spoločnej stupnici"></div>
+      <div class="devline" id="devline" hidden aria-label="Tepelné čerpadlo"></div>
       <div class="stats adm" id="stats"></div>
     </section>
 
@@ -1705,8 +1710,34 @@ function applyFunkcie(fn) {
   $("#agentoff").classList.toggle("fn-off", !aoff); $("#chatform").classList.toggle("fn-off", aoff); $("#chips").classList.toggle("fn-off", aoff);
   if (curTab && OFF_TABS.has(curTab)) showTab("prehlad");
 }
+/* riadok „Tepelné čerpadlo“ na Prehľade: názov zariadenia a jeho typ z profilu */
+function renderDevice(pi) {
+  const box = $("#devline"); if (!box) return;
+  const z = pi && pi.zariadenie_info;
+  if (!pi || (!pi.zariadenie && !z)) { box.hidden = true; return; }
+  const TYP = {split: "Split", mono: "Mono (monoblok)", hydrosplit: "Hydrosplit"};
+  const KUR = {radiatory: "radiátory", podlahove: "podlahové kúrenie", kombinovane: "radiátory + podlaha"};
+  const tags = [];
+  if (z) {
+    if (z.typ) tags.push(TYP[z.typ] || z.typ);
+    if (z.vykon_kw) tags.push(f(z.vykon_kw, z.vykon_kw % 1 ? 1 : 0) + " kW");
+    if (z.fazy) tags.push(z.fazy === 1 ? "1-fázové" : "3-fázové");
+    if (z.chladivo) tags.push(z.chladivo);
+    if (z.kurenie) tags.push(KUR[z.kurenie] || z.kurenie);
+    if (z.tuv) tags.push("ohrev TÚV");
+    if (z.model) tags.push("model " + z.model);
+  }
+  let cop = "";
+  if (z) cop = z.model_v_kniznici ? (z.model_overeny ? "COP z tabuľky výrobcu (overené)" : "COP z tabuľky výrobcu") : "bez tabuľky výrobcu";
+  const admin = ROLE === "admin";
+  box.innerHTML = `<span class="dn">${esc(pi.zariadenie || (z && z.model) || "Tepelné čerpadlo")}</span>` +
+    tags.map(t => `<span class="tag">${esc(t)}</span>`).join("") +
+    (cop ? (admin ? `<a class="tag" href="#nastavenia" id="devcfg" title="Zmeniť v Nastavenia → Zariadenie a dom">${esc(cop)}</a>` : `<span class="tag">${esc(cop)}</span>`) : "");
+  box.hidden = false;
+}
 function applyProfil(pi) {
   if (!pi || !Array.isArray(pi.izby) || !pi.izby.length) return;
+  renderDevice(pi);
   PI = pi;
   const sig = JSON.stringify([pi.izby, pi.ciel_rozsah, pi.funkcie, pi.zariadenie, pi.tuv_entity || null]);
   if (sig === profSig) return; profSig = sig;

@@ -1266,9 +1266,10 @@ def profil_info(cfg):
     tuv_ent = profil.device_entity("tuv", p)
     tuv_on = bool(p["zariadenie"].get("tuv") and tuv_ent)
     try:
-        mdl = profil.model(p) is not None
+        m = profil.model(p)
     except Exception:
-        mdl = False
+        m = None
+    mdl = m is not None
     izby = [{"kluc": r["kluc"], "nazov": r["nazov"], "referencna": r["kluc"] == ref, "esp": s_map.get(r["kluc"]) or r["esp"] or ""}
             for r in p["izby"]]
     izby.sort(key=lambda r: not r["referencna"])
@@ -1277,6 +1278,10 @@ def profil_info(cfg):
            "ciel_rozsah": [lo, hi],
            "funkcie": {"ha": bool((cfg.get("HA_TOKEN") or "").strip()), "agent_ai": bool((cfg.get("OPENROUTER_API_KEY") or "").strip()),
                        "tuv": tuv_on, "spotreba_domu": _spotreba_domu(cfg), "model_cop": mdl}}
+    z = p["zariadenie"]
+    out["zariadenie_info"] = {"model": z.get("model") or "", "typ": z.get("typ"), "vykon_kw": z.get("vykon_kw"),
+                              "fazy": z.get("fazy"), "chladivo": z.get("chladivo") or "", "kurenie": z.get("kurenie"),
+                              "tuv": bool(z.get("tuv")), "model_v_kniznici": mdl, "model_overeny": bool(m and m.get("overene"))}
     if tuv_on:
         out["tuv_entity"] = {"teplota": tuv_ent, "ciel": profil.device_entity("tuv_ciel", p) or TUV_CIEL_ENT}
     return out
