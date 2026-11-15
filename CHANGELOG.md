@@ -2,6 +2,18 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] – 2026-11-15
+
+### Pridané
+- **25 nových modelov** v `modely/` z dátových kníh výrobcu (tabuľky Maximum Heating Capacity, Peak): Mono R32
+  `AE050/080/120/160RXYD*G`, Mono R290 `AE050/080/120/160CXYD*K` a `…CXYB*K` (so zabudovaným čerpadlom), Split R32
+  `AE040/060/090RXED*G`. Spolu 31 modelov; overený na reálnom zariadení zostáva len AE120JXEDGH.
+- `docs/MODELY.md` – zoznam modelov so zdrojmi a návod, ako pridať ďalší.
+
+### Opravené
+- Hodinové štatistiky: chyba formátovania SQL pri načítaní ďalších teplôt (chodba, kotolňa) z `agent.db`.
+- Test predvoleného profilu sa preskočí, ak má inštalácia vlastný `profil.json`.
+
 ## [2.0.0] – 2026-11-15
 
 Aplikáciu možno nastaviť pre iné tepelné čerpadlo Samsung EHS a iný dom bez úprav kódu. Bez `profil.json` sa správa
@@ -44,5 +56,6 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.1.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.1.0
 [2.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.0.0
 [1.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v1.0.0
