@@ -2,8 +2,20 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
-## [2.1.1] – 2026-11-15
+## [2.2.0] – 2026-11-15
 
+### Pridané
+- **Jazyky webu:** všetky texty rozhrania (ui.html aj štatistiky) sú v `locales/sk.json` a `locales/en.json` (1432 kľúčov).
+  Prepínač **SK / EN** v hornej lište; predvolený jazyk podľa prehliadača (sk/cs → slovenčina, inak angličtina),
+  voľba sa pamätá. Čísla a dátumy podľa jazyka (v angličtine desatinná bodka, „15 Nov“).
+  Nový jazyk = nový súbor `locales/xx.json` s rovnakými kľúčmi. Server posiela `/locales/<xx>.json`.
+- `test_i18n.py` – zhoda kľúčov medzi jazykmi, množné čísla, použité kľúče, žiadny natvrdo zadaný slovenský text.
+
+### Ostáva po slovensky
+- Texty zo servera: hodnotenia a správy AI agenta, chybové hlášky API, upozornenia, názvy metrík štatistík,
+  a údaje z profilu (názvy izieb, entity ESP).
+
+## [2.1.1] – 2026-11-15
 ### Pridané
 - Prehľad: riadok s typom tepelného čerpadla z profilu (názov, Split/Mono, výkon, fázy, chladivo, typ kúrenia, TÚV, model
   a či sa COP počíta z overenej tabuľky výrobcu); správca sa z neho preklikne do Nastavení. `/api/status` → `profil_info.zariadenie_info`.
@@ -62,6 +74,7 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.2.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.2.0
 [2.1.1]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.1.1
 [2.1.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.1.0
 [2.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.0.0

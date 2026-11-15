@@ -1,30 +1,45 @@
 /* Záložka „Štatistiky“ – samostatný skript (IIFE). Verejné API: window.StatsUI = { show(), hide(), resize() }.
-   Používa globály stránky (api), ak existujú; inak vlastné náhrady. Žiadne knižnice, žiadne externé požiadavky. */
+   Používa globály stránky (api), ak existujú; inak vlastné náhrady. Žiadne knižnice, žiadne externé požiadavky.
+   Texty idú z prekladov (locales/*.json, kľúče stats.*) cez globálne t(), tn(), fnum(), LOCALE z ui.html. */
 (function () {
 "use strict";
 if (window.StatsUI) return;
 
+/* náhrady, ak by ui.html i18n nedefinoval (stránka sa nesmie zrútiť) */
+const t = (k, v) => typeof window.t === "function" ? window.t(k, v) : k;
+const tn = (k, n, v) => typeof window.tn === "function" ? window.tn(k, n, v) : k;
+const LOC = () => window.LOCALE || "sk-SK";
+const fnumL = (x, n) => typeof window.fnum === "function" ? window.fnum(x, n) : x.toFixed(n).replace(".", window.LANG && window.LANG !== "sk" ? "." : ",").replace("-", "−");
+
 const ROOT_ID = "tab-statistiky";
 const SKEY = "kurenie-stats-v1";
-const VIEWS = [["den", "Deň"], ["porovnanie", "Porovnanie"], ["obdobie", "Obdobie"], ["poruchy", "Poruchy"]];
-const MONTHS = ["január", "február", "marec", "apríl", "máj", "jún", "júl", "august", "september", "október", "november", "december"];
-const WDS = ["ne", "po", "ut", "st", "št", "pi", "so"];
-const GROUPS = {vonku: "Vonku", izby: "Izby a referenčná teplota", voda: "Voda", tuv: "TÚV", kompresor: "Kompresor", energia: "Energia", ucinnost: "Účinnosť", kvalita: "Kvalita"};
-/* núdzový zoznam metrík (spec §6), ak by /api/stats/meta zlyhalo: [key, label, unit, group, decimals, agg] */
-const DEFAULT_METRICS = [
-  ["vonku", "Vonku", "°C", "vonku", 1, "avg"], ["ciel", "Referenčná teplota", "°C", "izby", 1, "avg"], ["detska", "Detská (riadiaca)", "°C", "izby", 1, "avg"],
-  ["jedalen", "Jedáleň", "°C", "izby", 1, "avg"], ["kuchyna", "Kuchyňa", "°C", "izby", 1, "avg"], ["obyvacka", "Obývačka", "°C", "izby", 1, "avg"],
-  ["spalna", "Spálňa", "°C", "izby", 1, "avg"], ["pracovna", "Pracovňa", "°C", "izby", 1, "avg"], ["kupelna", "Kúpeľňa", "°C", "izby", 1, "avg"],
-  ["chodba", "Chodba", "°C", "izby", 1, "avg"], ["kotolna", "Kotolňa", "°C", "izby", 1, "avg"],
-  ["tw2", "Voda do domu (výstup)", "°C", "voda", 1, "avg"], ["tw1", "Spiatočka", "°C", "voda", 1, "avg"], ["wl", "Cieľová voda (krivka)", "°C", "voda", 1, "avg"],
-  ["dt_beh", "ΔT pri behu", "°C", "voda", 1, "avg"], ["tuv", "TÚV (bojler)", "°C", "tuv", 1, "avg"], ["tuv_ciel", "Cieľ TÚV", "°C", "tuv", 1, "avg"],
-  ["tuv_min", "Ohrev TÚV (min)", "min", "tuv", 0, "sum"], ["beh_min", "Chod kompresora (min)", "min", "kompresor", 0, "sum"],
-  ["kurenie_min", "Kúrenie (min)", "min", "kompresor", 0, "sum"], ["odmraz_min", "Odmrazovanie (min)", "min", "kompresor", 0, "sum"],
-  ["starty", "Štarty", "", "kompresor", 0, "sum"], ["hz_avg", "Frekvencia Ø", "Hz", "kompresor", 0, "avg"], ["hz_max", "Frekvencia max", "Hz", "kompresor", 0, "max"],
-  ["kwh", "Spotreba (odhad) kWh", "kWh", "energia", 2, "sum"], ["kwh_cal", "Spotreba (kalibrovaná) kWh", "kWh", "energia", 2, "sum"],
-  ["kwh_dom", "Dom spolu, kWh", "kWh", "energia", 2, "sum"], ["prikon", "Príkon Ø (W)", "W", "energia", 0, "avg"],
-  ["q_kwh", "Vyrobené teplo, kWh", "kWh", "ucinnost", 2, "sum"], ["cop", "COP", "", "ucinnost", 2, "ratio"]
-].map(a => ({key: a[0], label: a[1], unit: a[2], group: a[3], decimals: a[4], agg: a[5]}));
+const VIEWS = ["den", "porovnanie", "obdobie", "poruchy"];
+const GROUP_KEYS = ["vonku", "izby", "voda", "tuv", "kompresor", "energia", "ucinnost", "kvalita"];
+const grpName = g => GROUP_KEYS.includes(g) ? t("stats.skupina." + g) : g;
+/* názvy z číselníkov: známy kľúč sa prekladá, neznámy (z API) ostáva ako je */
+const TL_KEYS = ["beh_kurenie", "beh_tuv", "odmrazovanie", "stoji", "bez_dat"];
+const MODE_KEYS = ["kurenie", "tuv", "odmrazovanie", "zmiesane"];
+const SRC_KEYS = ["tc_error", "gap", "alert", "manual"];
+const HSRC_KEYS = ["tc", "ha", "mix"];
+const lk = (prefix, keys, k) => keys.includes(k) ? t(prefix + k) : k;
+const tlName = k => lk("stats.stav.", TL_KEYS, k), modeName = k => lk("stats.rezim.", MODE_KEYS, k), srcName = k => lk("stats.zdroj.", SRC_KEYS, k), hsrcName = k => lk("stats.hzdroj.", HSRC_KEYS, k);
+/* núdzový zoznam metrík (spec §6), ak by /api/stats/meta zlyhalo: [key, unit, group, decimals, agg]; názov = stats.metrika.<key> */
+const DM = [
+  ["vonku", "°C", "vonku", 1, "avg"], ["ciel", "°C", "izby", 1, "avg"], ["detska", "°C", "izby", 1, "avg"],
+  ["jedalen", "°C", "izby", 1, "avg"], ["kuchyna", "°C", "izby", 1, "avg"], ["obyvacka", "°C", "izby", 1, "avg"],
+  ["spalna", "°C", "izby", 1, "avg"], ["pracovna", "°C", "izby", 1, "avg"], ["kupelna", "°C", "izby", 1, "avg"],
+  ["chodba", "°C", "izby", 1, "avg"], ["kotolna", "°C", "izby", 1, "avg"],
+  ["tw2", "°C", "voda", 1, "avg"], ["tw1", "°C", "voda", 1, "avg"], ["wl", "°C", "voda", 1, "avg"],
+  ["dt_beh", "°C", "voda", 1, "avg"], ["tuv", "°C", "tuv", 1, "avg"], ["tuv_ciel", "°C", "tuv", 1, "avg"],
+  ["tuv_min", "min", "tuv", 0, "sum"], ["beh_min", "min", "kompresor", 0, "sum"],
+  ["kurenie_min", "min", "kompresor", 0, "sum"], ["odmraz_min", "min", "kompresor", 0, "sum"],
+  ["starty", "", "kompresor", 0, "sum"], ["hz_avg", "Hz", "kompresor", 0, "avg"], ["hz_max", "Hz", "kompresor", 0, "max"],
+  ["kwh", "kWh", "energia", 2, "sum"], ["kwh_cal", "kWh", "energia", 2, "sum"],
+  ["kwh_dom", "kWh", "energia", 2, "sum"], ["prikon", "W", "energia", 0, "avg"],
+  ["q_kwh", "kWh", "ucinnost", 2, "sum"], ["cop", "", "ucinnost", 2, "ratio"]
+];
+let dmCache = null;
+const defaultMetrics = () => dmCache || (dmCache = DM.map(a => ({key: a[0], label: t("stats.metrika." + a[0]), unit: a[1], group: a[2], decimals: a[3], agg: a[4]})));
 /* farby a štýl čiar pre denné grafy (len tokeny) */
 const SER = {
   vonku: {c: "--ink-2"}, ciel: {c: "--mut", dash: true}, detska: {c: "--s1"}, jedalen: {c: "--s2"}, kuchyna: {c: "--s3"}, obyvacka: {c: "--s4"},
@@ -37,46 +52,41 @@ const SER = {
 const roomKeys = () => metricList().filter(m => m.group === "izby" && m.key !== "ciel").map(m => m.key);
 const roomSer = k => { const i = roomKeys().indexOf(k); return {c: "--s" + (((i < 0 ? 0 : i) % 8) + 1)}; };
 const dayCards = () => [
-  {id: "t", title: "Teploty", plots: [
-    {id: "vonku", h: 120, label: "Vonku, °C", keys: ["vonku"]},
-    {id: "izby", h: 220, label: "Izby a referenčná teplota, °C", keys: ["ciel"].concat(roomKeys())}]},
-  {id: "w", title: "Voda a bojler", plots: [{id: "voda", h: 200, label: "°C", keys: ["tw2", "tw1", "wl", "tuv"]}]},
-  {id: "k", title: "Kompresor", plots: [
-    {id: "beh", h: 120, label: "Chod kompresora, minút za hodinu", keys: ["beh_min"], bars: true, fixed: [0, 60]},
-    {id: "hz", h: 140, label: "Frekvencia kompresora, Hz", keys: ["hz_avg", "hz_max"], zero: true}]},
-  {id: "e", title: "Spotreba", plots: [
-    {id: "kwh", h: 130, label: "Spotreba čerpadla, kWh za hodinu", keys: ["kwh_pump"], bars: true, zero: true},
-    {id: "dom", h: 150, label: "Čerpadlo a dom spolu, kWh za hodinu", keys: ["kwh_pump", "kwh_dom"], zero: true, need: 2}]},
-  {id: "c", title: "Účinnosť (COP)", nomsg: "COP nie je k dispozícii: chýbajú platné údaje o prietoku vody alebo spotrebe.", plots: [
-    {id: "cop", h: 130, label: "COP po hodinách (vyrobené teplo / spotreba)", keys: ["cop"], bars: true, zero: true}]}
+  {id: "t", title: t("stats.karta.teploty"), plots: [
+    {id: "vonku", h: 120, label: t("stats.graf.vonku"), keys: ["vonku"]},
+    {id: "izby", h: 220, label: t("stats.graf.izby"), keys: ["ciel"].concat(roomKeys())}]},
+  {id: "w", title: t("stats.karta.voda"), plots: [{id: "voda", h: 200, label: t("stats.graf.voda"), keys: ["tw2", "tw1", "wl", "tuv"]}]},
+  {id: "k", title: t("stats.karta.kompresor"), plots: [
+    {id: "beh", h: 120, label: t("stats.graf.beh"), keys: ["beh_min"], bars: true, fixed: [0, 60]},
+    {id: "hz", h: 140, label: t("stats.graf.hz"), keys: ["hz_avg", "hz_max"], zero: true}]},
+  {id: "e", title: t("stats.karta.spotreba"), plots: [
+    {id: "kwh", h: 130, label: t("stats.graf.kwh"), keys: ["kwh_pump"], bars: true, zero: true},
+    {id: "dom", h: 150, label: t("stats.graf.dom"), keys: ["kwh_pump", "kwh_dom"], zero: true, need: 2}]},
+  {id: "c", title: t("stats.karta.cop"), nomsg: t("stats.graf.cop_nedostupne"), plots: [
+    {id: "cop", h: 130, label: t("stats.graf.cop"), keys: ["cop"], bars: true, zero: true}]}
 ];
 const colGroups = () => [
-  ["teploty", "Teploty", ["vonku", "ciel"].concat(roomKeys())],
-  ["voda", "Voda", ["tw2", "tw1", "wl", "dt_beh"]],
-  ["tuv", "TÚV", ["tuv", "tuv_ciel", "tuv_min"]],
-  ["kompresor", "Kompresor", ["beh_min", "kurenie_min", "odmraz_min", "starty", "hz_avg", "hz_max"]],
-  ["energia", "Energia", ["kwh", "kwh_cal", "kwh_dom", "prikon"]],
-  ["ucinnost", "Účinnosť", ["q_kwh", "cop"]],
-  ["pokrytie", "Pokrytie", ["n", "src"]]
+  ["teploty", t("stats.stlpce.teploty"), ["vonku", "ciel"].concat(roomKeys())],
+  ["voda", t("stats.stlpce.voda"), ["tw2", "tw1", "wl", "dt_beh"]],
+  ["tuv", t("stats.stlpce.tuv"), ["tuv", "tuv_ciel", "tuv_min"]],
+  ["kompresor", t("stats.stlpce.kompresor"), ["beh_min", "kurenie_min", "odmraz_min", "starty", "hz_avg", "hz_max"]],
+  ["energia", t("stats.stlpce.energia"), ["kwh", "kwh_cal", "kwh_dom", "prikon"]],
+  ["ucinnost", t("stats.stlpce.ucinnost"), ["q_kwh", "cop"]],
+  ["pokrytie", t("stats.stlpce.pokrytie"), ["n", "src"]]
 ];
-const TL_STATE = {beh_kurenie: "Kúrenie", beh_tuv: "Ohrev TÚV", odmrazovanie: "Odmrazovanie", stoji: "Stojí", bez_dat: "Bez dát"};
-const MODE_TXT = {kurenie: "Kúrenie", tuv: "TÚV", odmrazovanie: "Odmrazovanie", zmiesane: "Zmiešané"};
-const SRC_TXT = {tc_error: "Čerpadlo (chybový kód)", gap: "Výpadok dát", alert: "Upozornenie agenta", manual: "Zadané ručne"};
-const HSRC = {tc: "Čerpadlo", ha: "HA", mix: "Zmes"};
 const RNG_COLS = ["vonku", "tw2", "tw1", "beh_min", "starty", "odmraz_min", "tuv_min", "kwh", "kwh_spotreba", "kwh_cal", "kwh_dom", "q_kwh", "cop", "cop_kurenie", "cop_tuv", "prikon", "hdd", "kwh_hdd"];
-const EXTRA = {hdd: {label: "Stupňo-dni", unit: "°C·d", decimals: 1, group: "kvalita"}, kwh_hdd: {label: "kWh na stupňo-deň", unit: "kWh/°C·d", decimals: 2, group: "kvalita"},
-  beh_pct: {label: "Beh kompresora", unit: "%", decimals: 0, group: "kompresor"}, vonku_min: {label: "Vonku min", unit: "°C", decimals: 1, group: "vonku"},
-  vonku_max: {label: "Vonku max", unit: "°C", decimals: 1, group: "vonku"}, hodin_s_datami: {label: "Hodín s dátami", unit: "h", decimals: 0, group: "kvalita"},
-  poruch: {label: "Poruchy", unit: "", decimals: 0, group: "kvalita"}, tuv_max: {label: "TÚV max", unit: "°C", decimals: 1, group: "tuv"},
-  kwh_spotreba: {label: "Spotreba čerpadla (kal. alebo odhad)", unit: "kWh", decimals: 2, group: "energia"}, kwh_pump: {label: "Čerpadlo", unit: "kWh", decimals: 2, group: "energia"},
-  cop_kurenie: {label: "COP kúrenie", unit: "", decimals: 2, group: "ucinnost"}, cop_tuv: {label: "COP TÚV", unit: "", decimals: 2, group: "ucinnost"}};
+/* doplnkové metriky: key -> [jednotka, desatinné, skupina]; názov = stats.metrika.<key> */
+const EXTRA = {hdd: ["°C·d", 1, "kvalita"], kwh_hdd: ["kWh/°C·d", 2, "kvalita"], beh_pct: ["%", 0, "kompresor"], vonku_min: ["°C", 1, "vonku"],
+  vonku_max: ["°C", 1, "vonku"], hodin_s_datami: ["h", 0, "kvalita"], poruch: ["", 0, "kvalita"], tuv_max: ["°C", 1, "tuv"],
+  kwh_spotreba: ["kWh", 2, "energia"], kwh_pump: ["kWh", 2, "energia"], cop_kurenie: ["", 2, "ucinnost"], cop_tuv: ["", 2, "ucinnost"]};
+const extraOf = k => EXTRA[k] ? {label: t("stats.metrika." + k), unit: EXTRA[k][0], decimals: EXTRA[k][1], group: EXTRA[k][2]} : undefined;
 const FAR_PAST = "2020-01-01";
 
 /* ---------- pomocné funkcie ---------- */
 const gid = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const num = v => (v === null || v === undefined || v === "" || typeof v === "boolean") ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
-const f = (v, n) => { const x = num(v); if (x === null) return "–"; let s = x.toFixed(n === undefined ? 1 : n); if (/^-0(\.0+)?$/.test(s)) s = s.slice(1); return s.replace(".", ",").replace("-", "−"); };
+const f = (v, n) => { const x = num(v); if (x === null) return "–"; const d = n === undefined ? 1 : n; return fnumL(/^-0(\.0+)?$/.test(x.toFixed(d)) ? 0 : x, d); };
 const sf = (v, n) => { const x = num(v); if (x === null) return "–"; const s = f(x, n); return x > 0 && s !== f(0, n) ? "+" + s : s; };
 const pad2 = n => String(n).padStart(2, "0");
 const dstr = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
@@ -84,11 +94,14 @@ const todayS = () => dstr(new Date());
 const validD = s => { if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; const d = new Date(s + "T12:00:00"); return !Number.isNaN(d.getTime()) && dstr(d) === s; };
 const addDays = (s, n) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return dstr(d); };
 const addYears = (s, n) => { const y = +s.slice(0, 4) + n, m = s.slice(5, 7), dd = s.slice(8, 10); const r = y + "-" + m + "-" + dd; return validD(r) ? r : y + "-" + m + "-28"; };
-const fmtD = s => validD(s) ? (+s.slice(8, 10)) + ". " + (+s.slice(5, 7)) + ". " + s.slice(0, 4) : esc(s || "");
-const fmtDS = s => validD(s) ? (+s.slice(8, 10)) + ". " + (+s.slice(5, 7)) + "." : String(s || "");
-const fmtDW = s => validD(s) ? WDS[new Date(s + "T12:00:00").getDay()] + " " + fmtDS(s) : String(s || "");
+/* dátum: šablóny stats.datum.dmy / stats.datum.dm (sk „15. 11. 2026“, en „15 Nov 2026“), {mon} = krátky názov mesiaca podľa LOCALE */
+const monCache = {};
+const monShort = m => { const k = LOC() + m; return monCache[k] || (monCache[k] = new Date(2000, m - 1, 15).toLocaleDateString(LOC(), {month: "short"})); };
+const fmtD = s => validD(s) ? t("stats.datum.dmy", {d: +s.slice(8, 10), m: +s.slice(5, 7), mon: monShort(+s.slice(5, 7)), y: s.slice(0, 4)}) : esc(s || "");
+const fmtDS = s => validD(s) ? t("stats.datum.dm", {d: +s.slice(8, 10), m: +s.slice(5, 7), mon: monShort(+s.slice(5, 7))}) : String(s || "");
+const fmtDW = s => validD(s) ? t("stats.den_kratko." + new Date(s + "T12:00:00").getDay()) + " " + fmtDS(s) : String(s || "");
 const hm = ts => { const d = new Date(ts * 1000); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
-const dtm = ts => { const x = num(ts); if (x === null) return "–"; const d = new Date(x * 1000); return d.getDate() + ". " + (d.getMonth() + 1) + ". " + d.getFullYear() + " " + hm(x); };
+const dtm = ts => { const x = num(ts); if (x === null) return "–"; const d = new Date(x * 1000); return t("stats.datum.dmy", {d: d.getDate(), m: d.getMonth() + 1, mon: monShort(d.getMonth() + 1), y: d.getFullYear()}) + " " + hm(x); };
 const dur = m => { const x = num(m); if (x === null) return "–"; if (x < 1) return "< 1 min"; const r = Math.round(x); return r < 60 ? r + " min" : Math.floor(r / 60) + " h " + pad2(r % 60) + " min"; };
 const utcMs = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
 const msToS = ms => { const d = new Date(ms); return d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate()); };
@@ -105,7 +118,7 @@ function saveState() { try { sessionStorage.setItem(SKEY, JSON.stringify(S)); } 
 function loadState() {
   let o = null; try { o = JSON.parse(sessionStorage.getItem(SKEY) || "null"); } catch (e) {}
   if (!isObj(o)) return;
-  if (VIEWS.some(v => v[0] === o.view)) S.view = o.view;
+  if (VIEWS.includes(o.view)) S.view = o.view;
   if (validD(o.day) && o.day <= todayS()) S.day = o.day;
   if (Array.isArray(o.cmp)) { const c = o.cmp.filter((d, i, a) => validD(d) && a.indexOf(d) === i).slice(0, 6); if (c.length) S.cmp = c; }
   if (typeof o.cmpMetric === "string" && /^[a-z0-9_]{1,30}$/.test(o.cmpMetric)) S.cmpMetric = o.cmpMetric;
@@ -129,26 +142,26 @@ let built = false, visible = false, root = null, tipEl = null;
 async function localApi(path, body) {
   const o = body ? {method: "POST", headers: {"Content-Type": "application/json", "X-Kurenie": "1"}, body: JSON.stringify(body)} : {cache: "no-store"};
   const res = await fetch(path, o); let j = null; try { j = await res.json(); } catch (e) {}
-  if (!res.ok) return Object.assign({}, isObj(j) ? j : {}, {error: (j && j.error) || "Chyba servera (" + res.status + ")."});
+  if (!res.ok) return Object.assign({}, isObj(j) ? j : {}, {error: (j && j.error) || t("stats.spolocne.chyba_servera", {kod: res.status})});
   return j == null ? {} : j;
 }
 /* každé volanie vráti objekt; chyby (aj sieť, 401) sa premenia na {error} – nikdy nevyhodí výnimku */
 async function call(path, body) {
   try {
     const r = typeof api === "function" ? await api(path, body) : await localApi(path, body);
-    if (!isObj(r)) return {error: "Server vrátil neplatnú odpoveď."};
+    if (!isObj(r)) return {error: t("stats.spolocne.neplatna_odpoved_servera")};
     return r;
-  } catch (e) { return {error: e && e.auth ? "Platnosť prihlásenia vypršala, prihlás sa znova." : "Server neodpovedá. Skús to znova.", auth: !!(e && e.auth)}; }
+  } catch (e) { return {error: e && e.auth ? t("stats.spolocne.prihlasenie_vyprsalo") : t("stats.spolocne.server_neodpoveda"), auth: !!(e && e.auth)}; }
 }
 const q = o => Object.keys(o).filter(k => o[k] !== undefined && o[k] !== null && o[k] !== "").map(k => encodeURIComponent(k) + "=" + encodeURIComponent(o[k])).join("&");
 
 function metricList() {
   if (D.metrics && D.metrics.length) return D.metrics;
   const m = D.meta && arr(D.meta.metrics).filter(x => isObj(x) && typeof x.key === "string");
-  return m && m.length ? m : DEFAULT_METRICS;
+  return m && m.length ? m : defaultMetrics();
 }
 function M(key) {
-  const x = metricList().find(m => m.key === key) || DEFAULT_METRICS.find(m => m.key === key) || EXTRA[key];
+  const x = metricList().find(m => m.key === key) || defaultMetrics().find(m => m.key === key) || extraOf(key);
   const r = x ? Object.assign({key}, x) : {key, label: key, unit: "", decimals: 1, group: "kvalita"};
   if (num(r.decimals) === null) r.decimals = 1;
   if (typeof r.label === "string" && r.unit) {   /* jednotku nezobrazovať dvakrát: „Ohrev TÚV (min)“ + „min“ */
@@ -210,8 +223,8 @@ function drawPlot(p) {
   for (let k = 0; k <= n; k++) { const v = sc.lo + k * sc.step, y = fy(v).toFixed(1);
     s += `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${PAD.l - 8}" y="${(+y + 3.5).toFixed(1)}" text-anchor="end">${f(v, sc.dig)}</text>`; }
   for (const m of arr(p.missing)) { const a = fx(m[0]), b = fx(m[1]);
-    s += `<rect x="${a.toFixed(1)}" y="${PAD.t}" width="${Math.max(1, b - a).toFixed(1)}" height="${ih}" fill="var(--line)" opacity=".7"><title>Bez údajov</title></rect>`; }
-  for (const t of arr(p.ticks)) s += `<text x="${fx(t.x).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(t.label)}</text>`;
+    s += `<rect x="${a.toFixed(1)}" y="${PAD.t}" width="${Math.max(1, b - a).toFixed(1)}" height="${ih}" fill="var(--line)" opacity=".7"><title>${t("stats.spolocne.bez_udajov")}</title></rect>`; }
+  for (const tk of arr(p.ticks)) s += `<text x="${fx(tk.x).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(tk.label)}</text>`;
   if (p.bars) {
     const bw = Math.max(2, Math.min(26, iw * (p.minDx || 1) / span * .72)), base = fy(Math.min(Math.max(0, sc.lo), sc.hi));
     for (const se of vis) se.vals.forEach((v, i) => { if (v === null || !Number.isFinite(se.xs[i])) return; const y = fy(v), top = Math.min(y, base), hh = Math.abs(base - y);
@@ -268,27 +281,27 @@ function groupHover(g, i, cx, cy) {
   tipShow(g.tip(i), cx, cy);
 }
 const mkLegend = (items, act) => items.map(it => it.nodata
-  ? `<span class="st-lg nodata" title="Bez údajov"><i style="background:var(${it.color})"></i>${esc(it.label)} · bez údajov</span>`
+  ? `<span class="st-lg nodata" title="${t("stats.spolocne.bez_udajov")}"><i style="background:var(${it.color})"></i>${esc(it.label)} · ${t("stats.spolocne.bez_udajov_m")}</span>`
   : `<button type="button" class="st-lg" data-act="${act}" data-sid="${esc(it.id)}" aria-pressed="${it.hidden ? "false" : "true"}"><i class="${it.dash ? "dash" : it.bar ? "bar" : ""}" style="background:var(${it.color});color:var(${it.color})"></i>${esc(it.label)}</button>`).join("");
 
 const canDraw = host => !!(visible && root && host && host.clientWidth > 80 && root.offsetParent !== null);
-const setMsg = (id, t, cls) => { const el = gid(id); if (!el) return; el.textContent = t || ""; el.className = "st-msg" + (cls ? " " + cls : ""); };
+const setMsg = (id, txt, cls) => { const el = gid(id); if (!el) return; el.textContent = txt || ""; el.className = "st-msg" + (cls ? " " + cls : ""); };
 const stat = (l, v, u, d) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}${u ? `<small>${u}</small>` : ""}</div>${d ? `<div class="d">${d}</div>` : ""}</div>`;
-const nodata = t => `<div class="st-nod">${t}</div>`;
+const nodata = x => `<div class="st-nod">${x}</div>`;
 
 /* ---------- poruchy: spoločná karta (Deň aj Poruchy) ---------- */
 function faultCard(x, canDel) {
   if (!isObj(x)) return "";
-  const open = num(x.ts_end) === null, code = String(x.code || ""), title = x.title || (code ? "Porucha " + code : "Porucha");
+  const open = num(x.ts_end) === null, code = String(x.code || ""), title = x.title || (code ? t("stats.porucha.nazov_kod", {kod: code}) : t("stats.porucha.nazov"));
   let dm = num(x.duration_min); if (dm === null && !open && num(x.ts_start) !== null) dm = (num(x.ts_end) - num(x.ts_start)) / 60;
   const same = x.text && x.description && String(x.text).trim() === String(x.description).trim();
   let h = `<div class="st-fault" data-fid="${esc(x.id)}"><div class="st-fh"><b class="t">${esc(title)}</b>${code ? `<span class="tag">${esc(code)}</span>` : ""}` +
-    `<span class="pill ${open ? "p-pozor" : "p-rutina"}">${open ? "Otvorená" : "Ukončená"}</span></div>` +
-    `<div class="st-fh"><span>od ${esc(dtm(x.ts_start))}</span><span>do ${open ? "trvá" : esc(dtm(x.ts_end))}</span><span>trvanie ${esc(dur(dm))}</span><span class="tag">${esc(SRC_TXT[x.source] || x.source || "")}</span></div>`;
+    `<span class="pill ${open ? "p-pozor" : "p-rutina"}">${open ? t("stats.porucha.otvorena") : t("stats.porucha.ukoncena")}</span></div>` +
+    `<div class="st-fh"><span>${esc(t("stats.porucha.od", {t: dtm(x.ts_start)}))}</span><span>${esc(t("stats.porucha.do", {t: open ? t("stats.porucha.trva") : dtm(x.ts_end)}))}</span><span>${esc(t("stats.porucha.trvanie", {d: dur(dm)}))}</span><span class="tag">${esc(srcName(x.source) || x.source || "")}</span></div>`;
   if (x.text && !same) h += `<div class="st-fd">${esc(x.text)}</div>`;
   if (x.description) h += `<div class="st-fd">${esc(x.description)}</div>`;
-  if (x.fix) h += `<div class="st-fix"><b>Čo robiť:</b> ${esc(x.fix)}</div>`;
-  if (canDel && x.source === "manual" && x.id != null) h += `<div class="st-fh st-fa" data-fid="${esc(x.id)}"><button type="button" class="btn sm danger" data-act="fault-ask" data-id="${esc(x.id)}">Zmazať</button></div>`;
+  if (x.fix) h += `<div class="st-fix"><b>${t("stats.porucha.fix")}</b> ${esc(x.fix)}</div>`;
+  if (canDel && x.source === "manual" && x.id != null) h += `<div class="st-fh st-fa" data-fid="${esc(x.id)}"><button type="button" class="btn sm danger" data-act="fault-ask" data-id="${esc(x.id)}">${t("stats.porucha.zmazat")}</button></div>`;
   return h + `</div>`;
 }
 const faultsHtml = (list, canDel) => list.length ? list.map(x => faultCard(x, canDel)).join("") : "";
@@ -297,22 +310,22 @@ const faultsHtml = (list, canDel) => list.length ? list.map(x => faultCard(x, ca
 function renderCoverage() {
   const el = gid("st-cov"); if (!el) return;
   const c = D.meta && isObj(D.meta.coverage) ? D.meta.coverage : null;
-  if (!c) { el.textContent = D.meta === false ? "Dostupnosť dát sa nepodarilo načítať." : "Načítavam dostupnosť dát…"; return; }
+  if (!c) { el.textContent = D.meta === false ? t("stats.pokrytie.chyba") : t("stats.pokrytie.nacitavam"); return; }
   const fd = isObj(c.first_day) ? c.first_day : {};
-  const items = [["Vonku", fd.vonku], ["izby", fd.izby], ["voda", fd.voda], ["kompresor", fd.kompresor], ["energia", fd.energia]];
-  const parts = [], used = new Set();
+  const items = [["vonku", fd.vonku], ["izby", fd.izby], ["voda", fd.voda], ["kompresor", fd.kompresor], ["energia", fd.energia]];
+  const parts = [];
   const grp = (names, label) => { const sel = items.filter(i => names.includes(i[0]));
-    const byDate = new Map(); sel.forEach(i => { const k = i[1] || ""; if (!byDate.has(k)) byDate.set(k, []); byDate.get(k).push(i[0]); });
+    const byDate = new Map(); sel.forEach(i => { const k = i[1] || ""; if (!byDate.has(k)) byDate.set(k, []); byDate.get(k).push(t("stats.pokrytie.n_" + i[0])); });
     for (const [date, ns] of byDate) { const nm = ns.length === sel.length && label ? label : ns.map((n, ix) => ix ? n : n.charAt(0).toUpperCase() + n.slice(1)).join(", ");
-      parts.push(date ? `<span>${esc(nm)} od <b>${esc(fmtD(date))}</b></span>` : `<span>${esc(nm)}: bez dát</span>`); } };
-  grp(["Vonku", "izby"], "Vonku a izby"); grp(["voda", "kompresor", "energia"], "Čerpadlo");
-  parts.push(fd.kwh_dom ? `<span>Elektromer domu od <b>${esc(fmtD(fd.kwh_dom))}</b></span>` : `<span>Elektromer domu: bez dát</span>`);
-  parts.push(fd.cop ? `<span>COP od <b>${esc(fmtD(fd.cop))}</b></span>` : `<span>COP: bez dát (chýba prietok vody)</span>`);
+      parts.push(date ? `<span>${t("stats.pokrytie.od_html", {nm: esc(nm), d: fmtD(date)})}</span>` : `<span>${esc(t("stats.pokrytie.bez_dat", {nm}))}</span>`); } };
+  grp(["vonku", "izby"], t("stats.pokrytie.vonku_izby")); grp(["voda", "kompresor", "energia"], t("stats.pokrytie.cerpadlo"));
+  parts.push(fd.kwh_dom ? `<span>${t("stats.pokrytie.elektromer_html", {d: fmtD(fd.kwh_dom)})}</span>` : `<span>${t("stats.pokrytie.elektromer_bez")}</span>`);
+  parts.push(fd.cop ? `<span>${t("stats.pokrytie.cop_html", {d: fmtD(fd.cop)})}</span>` : `<span>${t("stats.pokrytie.cop_bez")}</span>`);
   const extra = [];
-  if (c.last_day) extra.push(`posledný deň <b>${esc(fmtD(c.last_day))}</b>`);
-  if (num(c.days_with_data) !== null) extra.push(`<b>${esc(f(c.days_with_data, 0))}</b> dní s dátami`);
-  if (num(c.hours) !== null) extra.push(`<b>${esc(f(c.hours, 0))}</b> hodín`);
-  el.innerHTML = `<span class="st-covl">Dostupnosť dát</span>${parts.join("")}${extra.map(x => `<span>${x}</span>`).join("")}`;
+  if (c.last_day) extra.push(t("stats.pokrytie.posledny_html", {d: fmtD(c.last_day)}));
+  if (num(c.days_with_data) !== null) extra.push(`<b>${esc(f(c.days_with_data, 0))}</b> ${tn("stats.pokrytie.dni_s_datami", num(c.days_with_data))}`);
+  if (num(c.hours) !== null) extra.push(`<b>${esc(f(c.hours, 0))}</b> ${tn("stats.pokrytie.hodin", num(c.hours))}`);
+  el.innerHTML = `<span class="st-covl">${t("stats.pokrytie.titul")}</span>${parts.join("")}${extra.map(x => `<span>${x}</span>`).join("")}`;
 }
 async function loadMeta() {
   const my = ++seq.meta, r = await call("api/stats/meta");
@@ -335,7 +348,7 @@ function updateExport() {
   const a = gid("st-export"); if (!a) return;
   const u = exportUrl();
   a.hidden = S.view === "poruchy";
-  if (u) { a.href = u; a.removeAttribute("aria-disabled"); a.title = "Stiahnuť zobrazený pohľad ako CSV"; } else { a.removeAttribute("href"); a.setAttribute("aria-disabled", "true"); a.title = "Najprv zadaj platné obdobie"; }
+  if (u) { a.href = u; a.removeAttribute("aria-disabled"); a.title = t("stats.export.stiahnut"); } else { a.removeAttribute("href"); a.setAttribute("aria-disabled", "true"); a.title = t("stats.export.najprv_obdobie"); }
 }
 
 /* ---------- kalibrácia spotreby ---------- */
@@ -343,31 +356,31 @@ const calInfo = () => { const m = D.meta; if (!isObj(m)) return null; if (isObj(
 const calK = () => { const d = D.day && num(D.day.kalibracia_k); if (d !== null && d !== false && d !== undefined) return d; const c = calInfo(); return c ? num(c.k) : null; };
 function kwhNote(s) {
   const cal = s.kwh_zdroj === "kalibrovany", k = calK();
-  return cal ? `<span class="st-badge" style="margin-left:0">kalibrované</span> podľa elektromera${k !== null ? " ×" + f(k, 2) : ""}`
-    : `<span class="st-badge" style="margin-left:0">odhad</span> z prúdu kompresora`;
+  return cal ? `<span class="st-badge" style="margin-left:0">${t("stats.kwh.kalibrovane")}</span> ${t("stats.kwh.podla_elektromera")}${k !== null ? " ×" + f(k, 2) : ""}`
+    : `<span class="st-badge" style="margin-left:0">${t("stats.kwh.odhad")}</span> ${t("stats.kwh.z_prudu")}`;
 }
 function renderCal() {
   const box = gid("st-day-cal"); if (!box) return;
   const c = calInfo();
-  if (!c) { box.innerHTML = D.meta === false ? nodata("Kalibráciu spotreby sa nepodarilo načítať.") : nodata("Načítavam kalibráciu…"); return; }
+  if (!c) { box.innerHTML = D.meta === false ? nodata(t("stats.kal.chyba")) : nodata(t("stats.kal.nacitavam")); return; }
   const k = num(c.k), nd = num(c.n_dni), nh = num(c.n_hodin), mp = num(c.mape);
   const when = c.datum ? String(c.datum).slice(0, 10) : (num(c.ts) !== null ? dstr(new Date(c.ts * 1000)) : "");
   let h = `<div class="stats st-stats">` +
-    stat("Koeficient k", k !== null ? "×" + f(k, 2) : "–", "", k !== null ? "skutočná spotreba ≈ odhad × k" : "nekalibrované (platí odhad)") +
-    stat("Dní v kalibrácii", f(nd === null ? 0 : nd, 0), "", nh !== null ? f(nh, 0) + " hodín chodu s údajom z elektromera" : "") +
-    stat("Odchýlka", mp !== null && k !== null ? "±" + f(mp, 1) : "–", mp !== null && k !== null ? "%" : "", "denných súčtov po kalibrácii") +
-    stat("Posledný prepočet", when ? fmtD(when) : "–", "", "raz denne, najviac 60 dní spätne") + `</div>`;
-  h += `<p class="sub" style="margin:14px 0 0">Odhad spotreby čerpadla z prúdu kompresora sa porovnáva s elektromerom celého domu (po odpočítaní základnej spotreby domu) a jeho korekcia k sa použije vo všetkých súhrnoch a v COP.</p>`;
-  if (c.metoda === "noc") h += `<p class="sub" style="margin:8px 0 0">Koeficient je kalibrovaný podľa nočných hodín elektromera.</p>`;
-  if (c.metoda === "noc_zaklad") h += `<p class="sub" style="margin:8px 0 0">Koeficient je kalibrovaný podľa nočných hodín elektromera; od nich sa odpočíta spotreba domu v noci ${esc(f(c.noc_zaklad_kwh, 2))} kWh za hodinu, zmeraná v teplých nociach bez kúrenia.</p>`;
+    stat(t("stats.kal.koeficient"), k !== null ? "×" + f(k, 2) : "–", "", k !== null ? t("stats.kal.vzorec") : t("stats.kal.nekalibrovane")) +
+    stat(t("stats.kal.dni"), f(nd === null ? 0 : nd, 0), "", nh !== null ? t("stats.kal.hodin_chodu", {n: f(nh, 0)}) : "") +
+    stat(t("stats.kal.odchylka"), mp !== null && k !== null ? "±" + f(mp, 1) : "–", mp !== null && k !== null ? "%" : "", t("stats.kal.dennych_suctov")) +
+    stat(t("stats.kal.prepocet"), when ? fmtD(when) : "–", "", t("stats.kal.prepocet_info")) + `</div>`;
+  h += `<p class="sub" style="margin:14px 0 0">${t("stats.kal.popis")}</p>`;
+  if (c.metoda === "noc") h += `<p class="sub" style="margin:8px 0 0">${t("stats.kal.noc")}</p>`;
+  if (c.metoda === "noc_zaklad") h += `<p class="sub" style="margin:8px 0 0">${t("stats.kal.noc_zaklad", {kwh: f(c.noc_zaklad_kwh, 2)})}</p>`;
   const pr = isObj(c.prietok) ? c.prietok : null, pK = pr ? num(pr.kurenie) : null, pT = pr ? num(pr.tuv) : null;
   if (pK !== null || pT !== null) {
     const merany = D.meta && isObj(D.meta.coverage) && D.meta.coverage.cop_zdroj === "pevny_prietok";
-    h += `<p class="sub" style="margin:8px 0 0">Prietok: kúrenie ${pK !== null ? f(pK, 1) + " l/min" : "–"} · TÚV ${pT !== null ? f(pT, 1) + " l/min" : "–"} (${merany ? "zmeraný" : "z tabuliek výrobcu"})</p>`;
+    h += `<p class="sub" style="margin:8px 0 0">${t("stats.kal.prietok", {k: pK !== null ? f(pK, 1) + " l/min" : "–", t: pT !== null ? f(pT, 1) + " l/min" : "–", zdroj: merany ? t("stats.kal.merany") : t("stats.kal.tabulky")})}</p>`;
   }
-  if (k === null) h += `<div class="callout warn st-warn" role="note" style="margin-top:12px">${esc(c.dovod || "Zatiaľ nie je dosť údajov z elektromera, preto sa zobrazuje neupravený odhad.")}</div>`;
+  if (k === null) h += `<div class="callout warn st-warn" role="note" style="margin-top:12px">${esc(c.dovod || t("stats.kal.malo_dat"))}</div>`;
   else if (c.dovod) h += `<p class="sub" style="margin:8px 0 0">${esc(c.dovod)}</p>`;
-  if (c.base_zdroj && /regres/i.test(String(c.base_zdroj))) h += `<p class="sub" style="margin:8px 0 0">Čerpadlo beží takmer nepretržite, preto sa základná spotreba domu (${esc(f(c.base_kwh, 2))} kWh za hodinu) odhadla regresiou; presnejšia bude, keď pribudnú hodiny bez chodu.</p>`;
+  if (c.base_zdroj && /regres/i.test(String(c.base_zdroj))) h += `<p class="sub" style="margin:8px 0 0">${t("stats.kal.regresia", {kwh: f(c.base_kwh, 2)})}</p>`;
   box.innerHTML = h;
 }
 
@@ -375,48 +388,48 @@ function renderCal() {
 function tilesHtml(s) {
   const hb = D.meta && num(D.meta.hdd_base);
   const flag = v => num(v) > 0 ? `<span class="flag">${f(v, 0)}</span>` : f(v, 0);
-  const t = [
-    stat("Vonku Ø", f(s.vonku), "°C", f(s.vonku_min) + " až " + f(s.vonku_max) + " °C"),
-    stat("Referenčná teplota", f(s.ciel), "°C", "cieľ izby Ø"),
-    stat("Voda výstup Ø", f(s.tw2), "°C", "spiatočka " + f(s.tw1) + " · cieľ " + f(s.wl) + " °C"),
-    stat("ΔT pri behu", f(s.dt_beh), "°C", "výstup − spiatočka"),
-    stat("TÚV Ø", f(s.tuv), "°C", "max " + f(s.tuv_max) + " °C · ohrev " + f(s.tuv_min, 0) + " min"),
-    stat("Beh kompresora", f(s.beh_pct, 0), "%", f(s.beh_min, 0) + " min · kúrenie " + f(s.kurenie_min, 0) + " min"),
-    stat("Štarty", f(s.starty, 0), "", "spustení kompresora"),
-    stat("Odmrazovanie", f(s.odmraz_min, 0), "min", ""),
-    stat("COP", f(s.cop, 2), "", num(s.cop) === null ? "nie je k dispozícii (chýba prietok vody)" :
-      "teplo " + f(s.q_kwh, 0) + " kWh / spotreba " + f(s.kwh_spotreba, 0) + " kWh" +
-      (num(s.cop_kurenie) !== null || num(s.cop_tuv) !== null ? " · kúrenie " + f(s.cop_kurenie, 2) + " · TÚV " + f(s.cop_tuv, 2) : "")),
-    stat("Spotreba čerpadla", f(num(s.kwh_spotreba) !== null ? s.kwh_spotreba : s.kwh, 1), "kWh", kwhNote(s)),
-    stat("Dom spolu", f(s.kwh_dom, 1), "kWh", num(s.kwh_dom) === null ? "údaj z elektromera zatiaľ nie je (chodí s oneskorením do 1 dňa)" :
-      "elektromer" + (num(s.kwh_spotreba) !== null && num(s.kwh_dom) > 0 ? " · čerpadlo " + f(100 * s.kwh_spotreba / s.kwh_dom, 0) + " %" : "")),
-    stat("Stupňo-dni", f(s.hdd, 1), "°C·d", hb !== null && hb !== false ? "základ " + f(hb, 0) + " °C" : ""),
-    stat("kWh na stupňo-deň", f(s.kwh_hdd, 2), "", num(s.kwh_hdd) === null ? "málo stupňo-dní alebo dát" : "spotreba / stupňo-dni"),
-    stat("Poruchy", flag(s.poruch), "", "zasahujúce do dňa"),
-    stat("Hodín s dátami", f(s.hodin_s_datami, 0), "h", "")
+  const tiles = [
+    stat(t("stats.dlazdica.vonku"), f(s.vonku), "°C", t("stats.dlazdica.vonku_rozsah", {min: f(s.vonku_min), max: f(s.vonku_max)})),
+    stat(t("stats.dlazdica.ciel"), f(s.ciel), "°C", t("stats.dlazdica.ciel_info")),
+    stat(t("stats.dlazdica.voda"), f(s.tw2), "°C", t("stats.dlazdica.voda_info", {tw1: f(s.tw1), wl: f(s.wl)})),
+    stat(t("stats.dlazdica.dt"), f(s.dt_beh), "°C", t("stats.dlazdica.dt_info")),
+    stat(t("stats.dlazdica.tuv"), f(s.tuv), "°C", t("stats.dlazdica.tuv_info", {max: f(s.tuv_max), min: f(s.tuv_min, 0)})),
+    stat(t("stats.dlazdica.beh"), f(s.beh_pct, 0), "%", t("stats.dlazdica.beh_info", {beh: f(s.beh_min, 0), kur: f(s.kurenie_min, 0)})),
+    stat(t("stats.dlazdica.starty"), f(s.starty, 0), "", t("stats.dlazdica.starty_info")),
+    stat(t("stats.dlazdica.odmrazovanie"), f(s.odmraz_min, 0), "min", ""),
+    stat(t("stats.dlazdica.cop"), f(s.cop, 2), "", num(s.cop) === null ? t("stats.dlazdica.cop_nie") :
+      t("stats.dlazdica.cop_info", {q: f(s.q_kwh, 0), kwh: f(s.kwh_spotreba, 0)}) +
+      (num(s.cop_kurenie) !== null || num(s.cop_tuv) !== null ? t("stats.dlazdica.cop_rozpis", {kur: f(s.cop_kurenie, 2), tuv: f(s.cop_tuv, 2)}) : "")),
+    stat(t("stats.dlazdica.spotreba"), f(num(s.kwh_spotreba) !== null ? s.kwh_spotreba : s.kwh, 1), "kWh", kwhNote(s)),
+    stat(t("stats.dlazdica.dom"), f(s.kwh_dom, 1), "kWh", num(s.kwh_dom) === null ? t("stats.dlazdica.dom_nie") :
+      (num(s.kwh_spotreba) !== null && num(s.kwh_dom) > 0 ? t("stats.dlazdica.dom_cerpadlo", {p: f(100 * s.kwh_spotreba / s.kwh_dom, 0)}) : t("stats.dlazdica.dom_elektromer"))),
+    stat(t("stats.dlazdica.hdd"), f(s.hdd, 1), "°C·d", hb !== null && hb !== false ? t("stats.dlazdica.hdd_zaklad", {hb: f(hb, 0)}) : ""),
+    stat(t("stats.dlazdica.kwh_hdd"), f(s.kwh_hdd, 2), "", num(s.kwh_hdd) === null ? t("stats.dlazdica.kwh_hdd_malo") : t("stats.dlazdica.kwh_hdd_info")),
+    stat(t("stats.dlazdica.poruchy"), flag(s.poruch), "", t("stats.dlazdica.poruchy_info")),
+    stat(t("stats.dlazdica.hodin"), f(s.hodin_s_datami, 0), "h", "")
   ];
-  return t.join("");
+  return tiles.join("");
 }
 function roomsHtml(s) {
   const keys = roomKeys().filter(k => num(s[k]) !== null);
   if (!keys.length) return "";
-  return `<div class="st-rooms"><span class="mut">Izby Ø</span>${keys.map(k => `<span>${esc(M(k).label)} <b>${f(s[k])} °C</b></span>`).join("")}</div>`;
+  return `<div class="st-rooms"><span class="mut">${t("stats.izby_priemer")}</span>${keys.map(k => `<span>${esc(M(k).label)} <b>${f(s[k])} °C</b></span>`).join("")}</div>`;
 }
 function renderTimeline(d) {
   const hrs = arr(d.hours), tl = arr(d.timeline).filter(x => isObj(x) && num(x.from) !== null && num(x.to) !== null && num(x.to) > num(x.from));
   const box = gid("st-day-tl");
-  if (!tl.length) { box.innerHTML = nodata("Časová os nie je k dispozícii."); return; }
+  if (!tl.length) { box.innerHTML = nodata(t("stats.os.nie_je")); return; }
   let t0 = hrs.length ? num(hrs[0].ts) : null, t1 = hrs.length ? num(hrs[hrs.length - 1].ts) : null;
   if (t0 === null) t0 = Math.min(...tl.map(x => +x.from)); t1 = t1 === null ? Math.max(...tl.map(x => +x.to)) : t1 + 3600;
   const span = Math.max(1, t1 - t0), tot = {};
   const segs = tl.map((x, i) => { const a = Math.max(t0, +x.from), b = Math.min(t1, +x.to); tot[x.state] = (tot[x.state] || 0) + Math.max(0, b - a) / 60;
     return `<i class="st-s-${esc(x.state)}" data-i="${i}" style="left:${((a - t0) / span * 100).toFixed(3)}%;width:${(Math.max(0, b - a) / span * 100).toFixed(3)}%"></i>`; }).join("");
-  const sumTxt = Object.keys(TL_STATE).filter(k => tot[k]).map(k => TL_STATE[k] + " " + dur(tot[k])).join(", ");
+  const sumTxt = TL_KEYS.filter(k => tot[k]).map(k => tlName(k) + " " + dur(tot[k])).join(", ");
   let ticks = "";
   hrs.forEach((h, i) => { const hh = num(h.h) !== null ? num(h.h) : i; if (hh % 3) return; const pos = (num(h.ts) - t0) / span * 100; if (!Number.isFinite(pos)) return;
     ticks += `<span class="st-tk${i === 0 ? " first" : ""}${hh % 6 ? " mi" : ""}" style="left:${pos.toFixed(3)}%">${pad2(hh)}:00</span>`; });
-  box.innerHTML = `<div class="st-tl" id="st-tl-bar" role="img" aria-label="Časová os dňa: ${esc(sumTxt)}">${segs}</div><div class="st-tkr" aria-hidden="true">${ticks}</div>` +
-    `<div class="st-key">${Object.keys(TL_STATE).map(k => `<span><i class="st-sw st-s-${k}"></i>${TL_STATE[k]}${tot[k] ? " · " + esc(dur(tot[k])) : ""}</span>`).join("")}</div>`;
+  box.innerHTML = `<div class="st-tl" id="st-tl-bar" role="img" aria-label="${esc(t("stats.os.aria", {sum: sumTxt}))}">${segs}</div><div class="st-tkr" aria-hidden="true">${ticks}</div>` +
+    `<div class="st-key">${TL_KEYS.map(k => `<span><i class="st-sw st-s-${k}"></i>${tlName(k)}${tot[k] ? " · " + esc(dur(tot[k])) : ""}</span>`).join("")}</div>`;
   box._tl = tl;
 }
 function renderHours() {
@@ -425,19 +438,19 @@ function renderHours() {
   const cols = cg.filter(g => S.cols[g[0]]).flatMap(g => g[2]);
   const metricKeys = cg.flatMap(g => g[2]).filter(k => k !== "n" && k !== "src");
   gid("st-hours-info").textContent = hrs.length ? hrs.length + " h" : "";
-  if (!cols.length) { box.innerHTML = nodata("Zapni aspoň jednu skupinu stĺpcov."); return; }
-  const head = "<tr><th>Hodina</th>" + cols.map(k => k === "n" ? `<th>Vzoriek</th>` : k === "src" ? `<th class="t">Zdroj</th>` : `<th>${esc(M(k).label)}<small>${esc(mUnit(k))}</small></th>`).join("") + "</tr>";
+  if (!cols.length) { box.innerHTML = nodata(t("stats.hodiny.ziadna_skupina")); return; }
+  const head = "<tr><th>" + t("stats.hodiny.hodina") + "</th>" + cols.map(k => k === "n" ? `<th>${t("stats.hodiny.vzoriek")}</th>` : k === "src" ? `<th class="t">${t("stats.hodiny.zdroj")}</th>` : `<th>${esc(M(k).label)}<small>${esc(mUnit(k))}</small></th>`).join("") + "</tr>";
   const rows = hrs.map((h, i) => { const hh = num(h.h) !== null ? num(h.h) : i, has = metricKeys.some(k => num(h[k]) !== null);
-    return `<tr class="${has ? "" : "nodata"}"><td>${pad2(hh)}:00</td>` + cols.map(k => k === "src" ? `<td class="t">${esc(HSRC[h.src] || h.src || "–")}</td>` : k === "n" ? `<td>${f(h.n, 0)}</td>` : `<td>${fm(k, h[k])}</td>`).join("") + "</tr>"; }).join("");
+    return `<tr class="${has ? "" : "nodata"}"><td>${pad2(hh)}:00</td>` + cols.map(k => k === "src" ? `<td class="t">${esc(hsrcName(h.src) || h.src || "–")}</td>` : k === "n" ? `<td>${f(h.n, 0)}</td>` : `<td>${fm(k, h[k])}</td>`).join("") + "</tr>"; }).join("");
   box.innerHTML = `<table class="st-tbl"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
 }
 function renderCycles() {
   const list = D.day ? arr(D.day.cycles).filter(isObj) : [], box = gid("st-day-cycles"); if (!box) return;
   const tot = list.reduce((a, c) => a + (num(c.minutes) || 0), 0);
-  gid("st-cyc-info").textContent = list.length ? list.length + " · spolu " + dur(tot) : "";
-  if (!list.length) { box.innerHTML = nodata("V tento deň nebol zaznamenaný žiadny cyklus kompresora."); return; }
-  box.innerHTML = `<table class="st-tbl"><thead><tr><th>Štart</th><th>Koniec</th><th>Trvanie</th><th class="t">Režim</th><th>Hz max<small>Hz Ø</small></th><th>Vonku<small>°C</small></th><th>Výstup max<small>°C</small></th><th class="t">Dôvod ukončenia</th></tr></thead><tbody>` +
-    list.map(c => `<tr><td>${num(c.ts_start) !== null ? hm(c.ts_start) : "–"}</td><td>${num(c.ts_stop) !== null ? hm(c.ts_stop) : "beží"}</td><td>${esc(dur(c.minutes))}</td><td class="t">${esc(MODE_TXT[c.mode] || c.mode || "–")}</td>` +
+  gid("st-cyc-info").textContent = list.length ? t("stats.cykly.suhrn", {n: list.length, d: dur(tot)}) : "";
+  if (!list.length) { box.innerHTML = nodata(t("stats.cykly.ziadny")); return; }
+  box.innerHTML = `<table class="st-tbl"><thead><tr><th>${t("stats.cykly.start")}</th><th>${t("stats.cykly.koniec")}</th><th>${t("stats.cykly.trvanie")}</th><th class="t">${t("stats.cykly.rezim")}</th><th>${t("stats.cykly.hz_max")}<small>${t("stats.cykly.hz_avg")}</small></th><th>${t("stats.cykly.vonku")}<small>°C</small></th><th>${t("stats.cykly.vystup_max")}<small>°C</small></th><th class="t">${t("stats.cykly.dovod")}</th></tr></thead><tbody>` +
+    list.map(c => `<tr><td>${num(c.ts_start) !== null ? hm(c.ts_start) : "–"}</td><td>${num(c.ts_stop) !== null ? hm(c.ts_stop) : t("stats.cykly.bezi")}</td><td>${esc(dur(c.minutes))}</td><td class="t">${esc(modeName(c.mode) || c.mode || "–")}</td>` +
       `<td>${f(c.f_max, 0)}<small class="st-dif">${f(c.f_avg, 0)}</small></td><td>${f(c.vonku)}</td><td>${f(c.tw2_max)}</td><td class="t">${esc(c.reason || "–")}</td></tr>`).join("") + `</tbody></table>`;
 }
 function drawDayCharts() {
@@ -448,7 +461,7 @@ function drawDayCharts() {
   if (!d || !hrs.length) { host.innerHTML = ""; return; }
   if (!canDraw(host)) return;
   const pumpCal = hrs.some(h => isObj(h) && num(h.kwh_cal) !== null);
-  const SLBL = {kwh_pump: pumpCal ? "Čerpadlo (kalibrované)" : "Čerpadlo (odhad)", kwh_dom: "Dom spolu (elektromer)"};
+  const SLBL = {kwh_pump: pumpCal ? t("stats.graf.cerpadlo_kal") : t("stats.graf.cerpadlo_odhad"), kwh_dom: t("stats.graf.dom_elektromer")};
   const W = host.clientWidth, N = hrs.length, xs = hrs.map((_, i) => i), step = W < 620 ? 6 : 3, ticks = [];
   hrs.forEach((h, i) => { const hh = num(h.h) !== null ? num(h.h) : i; if (hh % step === 0) ticks.push({x: i, label: pad2(hh) + ":00"}); });
   const cards = dayCards().map(card => {
@@ -459,7 +472,7 @@ function drawDayCharts() {
     return {card, pl, items, none: !pl.length};
   });
   host.innerHTML = cards.map(c => `<div class="st-card"><div class="st-card-h"><div class="st-card-t">${esc(c.card.title)}</div><div class="st-leg">${mkLegend(c.items, "lg")}</div></div>` +
-    (c.none ? nodata(esc(c.card.nomsg || "Pre tento deň nie sú údaje.")) : c.pl.map(x => `<div class="st-plot-t">${esc(x.pc.label)}</div><svg class="st-svg" data-p="${x.pc.id}" role="img" aria-label="${esc(c.card.title + ": " + x.pc.label)}"></svg>`).join("")) + `</div>`).join("");
+    (c.none ? nodata(esc(c.card.nomsg || t("stats.graf.ziadne_udaje"))) : c.pl.map(x => `<div class="st-plot-t">${esc(x.pc.label)}</div><svg class="st-svg" data-p="${x.pc.id}" role="img" aria-label="${esc(c.card.title + ": " + x.pc.label)}"></svg>`).join("")) + `</div>`).join("");
   const plots = [];
   for (const c of cards) for (const x of c.pl) {
     const svg = host.querySelector(`svg[data-p="${x.pc.id}"]`); if (!svg) continue;
@@ -472,7 +485,7 @@ function drawDayCharts() {
     for (const c of cards) { if (c.none) continue; const rows = [];
       for (const x of c.pl) for (const s of x.series) { if (!s.has || s.hidden || seen.has(s.id)) continue; seen.add(s.id); const v = s.vals[i]; rows.push(trow(s.color, esc(s.label), v === null ? "–" : esc(fmu(s.key, v)), v === null)); }
       if (!rows.length) continue; html += (first ? "" : "<hr>") + rows.join(""); first = false; }
-    if (num(h.n) !== null) html += `<hr><div class="s">Vzoriek v hodine: ${f(h.n, 0)}</div>`;
+    if (num(h.n) !== null) html += `<hr><div class="s">${t("stats.graf.vzoriek_v_hodine", {n: f(h.n, 0)})}</div>`;
     return html; };
   attachGroup({plots, xs, tip});
 }
@@ -481,8 +494,8 @@ function renderDay() {
   const s = isObj(d.summary) ? d.summary : {}, faults = arr(d.faults).filter(isObj);
   const has = d.has_data === true || (d.has_data === undefined && num(s.hodin_s_datami) > 0);
   gid("st-day").value = S.day; gid("st-day").max = todayS();
-  gid("st-day-title").textContent = new Date(S.day + "T12:00:00").toLocaleDateString("sk-SK", {weekday: "long", day: "numeric", month: "long", year: "numeric"});
-  gid("st-day-badge").innerHTML = S.day === todayS() ? `<span class="pill p-info">Dnes · prebieha</span>` : "";
+  gid("st-day-title").textContent = new Date(S.day + "T12:00:00").toLocaleDateString(LOC(), {weekday: "long", day: "numeric", month: "long", year: "numeric"});
+  gid("st-day-badge").innerHTML = S.day === todayS() ? `<span class="pill p-info">${t("stats.den.dnes_prebieha")}</span>` : "";
   gid("st-next").disabled = S.day >= todayS();
   gid("st-day-sum").hidden = false;
   gid("st-day-tiles").hidden = !has; gid("st-day-nodata").hidden = has; gid("st-day-tlwrap").hidden = !has;
@@ -493,16 +506,16 @@ function renderDay() {
     renderTimeline(d); drawDayCharts(); renderHours(); renderCycles();
   } else { gid("st-day-rooms").innerHTML = ""; gid("st-day-charts").innerHTML = ""; }
   gid("st-dfault-info").textContent = faults.length ? String(faults.length) : "";
-  gid("st-day-faults").innerHTML = faults.length ? faultsHtml(faults, true) : nodata("V tento deň nie je zaznamenaná žiadna porucha.");
+  gid("st-day-faults").innerHTML = faults.length ? faultsHtml(faults, true) : nodata(t("stats.den.ziadna_porucha"));
   updateExport();
 }
 async function loadDay() {
   const day = S.day, my = ++seq.den;
-  setMsg("st-day-msg", "Načítavam…");
+  setMsg("st-day-msg", t("stats.spolocne.nacitavam"));
   const r = await call("api/stats/day?" + q({d: day}));
   if (my !== seq.den) return;
   if (r.error || !Array.isArray(r.hours)) {
-    D.day = null; D.at.den = 0; setMsg("st-day-msg", "Deň sa nepodarilo načítať: " + (r.error || "neplatná odpoveď servera."), "err");
+    D.day = null; D.at.den = 0; setMsg("st-day-msg", t("stats.den.chyba", {e: r.error || t("stats.spolocne.neplatna_odpoved")}), "err");
     gid("st-day-sum").hidden = true; for (const id of ["st-day-p2", "st-day-p3", "st-day-p4", "st-day-p5"]) gid(id).hidden = true;
     gid("st-day-title").textContent = fmtD(day); return;
   }
@@ -516,7 +529,7 @@ const shiftDay = n => gotoDay(addDays(S.day, n));
 function metricOptions(sel) {
   const order = [], by = {};
   for (const m of metricList()) { const g = m.group || "kvalita"; if (!by[g]) { by[g] = []; order.push(g); } by[g].push(m); }
-  return order.map(g => `<optgroup label="${esc(GROUPS[g] || g)}">` + by[g].map(m => `<option value="${esc(m.key)}"${m.key === sel ? " selected" : ""}>${esc(M(m.key).label)}${m.unit ? " (" + esc(m.unit) + ")" : ""}</option>`).join("") + `</optgroup>`).join("");
+  return order.map(g => `<optgroup label="${esc(grpName(g))}">` + by[g].map(m => `<option value="${esc(m.key)}"${m.key === sel ? " selected" : ""}>${esc(M(m.key).label)}${m.unit ? " (" + esc(m.unit) + ")" : ""}</option>`).join("") + `</optgroup>`).join("");
 }
 function fillMetricSelects() {
   const a = gid("st-cmp-metric"), b = gid("st-rng-metric");
@@ -531,12 +544,12 @@ function cmpLabelFor(d) { const it = cmpItems().find(x => x.date === d); return 
 function renderCmpControls() {
   const qb = gid("st-cmp-quick"), sb = gid("st-cmp-sel"); if (!qb || !sb) return;
   gid("st-cmp-base").value = S.cmp[0] || "";
-  if (D.quick === false) qb.innerHTML = `<span class="st-msg err">Rýchle voľby sa nepodarilo načítať. Dni môžeš pridať ručne.</span>`;
-  else if (!D.quick) qb.innerHTML = `<span class="st-msg">Načítavam…</span>`;
+  if (D.quick === false) qb.innerHTML = `<span class="st-msg err">${t("stats.porovnanie.rychle_chyba")}</span>`;
+  else if (!D.quick) qb.innerHTML = `<span class="st-msg">${t("stats.spolocne.nacitavam")}</span>`;
   else qb.innerHTML = D.quick.map(it => { const on = S.cmp.includes(it.date), dis = !on && !it.has_data;
-    return `<button type="button" class="chip st-ch" data-act="cmp-chip" data-d="${esc(it.date)}" aria-pressed="${on}"${dis ? ` disabled title="Pre tento deň nie sú dáta"` : ` title="${esc(fmtD(it.date))}"`}>${esc(it.label || it.key || it.date)} <small>${dis ? "bez dát" : esc(fmtDS(it.date))}</small></button>`; }).join("") || `<span class="st-msg">Žiadne rýchle voľby.</span>`;
-  sb.innerHTML = S.cmp.map((d, i) => `<span class="st-sel${i === 0 ? " first" : ""}"><i class="st-dot" style="background:var(--s${i + 1})"></i>${esc(cmpLabelFor(d))}${i === 0 ? " · základ" : ""}` +
-    `<button type="button" data-act="cmp-del" data-d="${esc(d)}" aria-label="Odobrať ${esc(fmtD(d))}"${S.cmp.length < 2 ? " disabled" : ""}>✕</button></span>`).join("");
+    return `<button type="button" class="chip st-ch" data-act="cmp-chip" data-d="${esc(it.date)}" aria-pressed="${on}"${dis ? ` disabled title="${t("stats.porovnanie.bez_dat_den")}"` : ` title="${esc(fmtD(it.date))}"`}>${esc(it.label || it.key || it.date)} <small>${dis ? t("stats.spolocne.bez_dat") : esc(fmtDS(it.date))}</small></button>`; }).join("") || `<span class="st-msg">${t("stats.porovnanie.ziadne_rychle")}</span>`;
+  sb.innerHTML = S.cmp.map((d, i) => `<span class="st-sel${i === 0 ? " first" : ""}"><i class="st-dot" style="background:var(--s${i + 1})"></i>${esc(cmpLabelFor(d))}${i === 0 ? " · " + t("stats.porovnanie.zaklad") : ""}` +
+    `<button type="button" data-act="cmp-del" data-d="${esc(d)}" aria-label="${esc(t("stats.porovnanie.odobrat", {d: fmtD(d)}))}"${S.cmp.length < 2 ? " disabled" : ""}>✕</button></span>`).join("");
 }
 async function loadQuick() {
   const base = S.cmp[0] || todayS(), my = ++seq.quick;
@@ -548,11 +561,11 @@ async function loadQuick() {
 }
 async function loadCmp() {
   const dates = S.cmp.slice(), my = ++seq.porovnanie;
-  setMsg("st-cmp-msg", "Načítavam…");
+  setMsg("st-cmp-msg", t("stats.spolocne.nacitavam"));
   const r = await call("api/stats/compare?" + q({dates: dates.join(",")}));
   if (my !== seq.porovnanie) return;
   if (r.error || !Array.isArray(r.dates)) {
-    D.cmp = null; D.at.porovnanie = 0; setMsg("st-cmp-msg", "Porovnanie sa nepodarilo načítať: " + (r.error || "neplatná odpoveď servera."), "err");
+    D.cmp = null; D.at.porovnanie = 0; setMsg("st-cmp-msg", t("stats.porovnanie.chyba", {e: r.error || t("stats.spolocne.neplatna_odpoved")}), "err");
     gid("st-cmp-p2").hidden = true; gid("st-cmp-p3").hidden = true; renderCmpControls(); return;
   }
   D.cmp = r; D.at.porovnanie = Date.now(); D.key.porovnanie = dates.join(",");
@@ -564,9 +577,9 @@ function renderCmp() {
   const items = cmpItems();
   gid("st-cmp-p2").hidden = !items.length; gid("st-cmp-p3").hidden = !items.length;
   renderCmpControls();
-  const t = items.filter(it => it.has_data !== false).map(it => num(isObj(it.summary) ? it.summary.vonku : null)).filter(v => v !== null);
-  gid("st-cmp-warn").innerHTML = t.length >= 2 && Math.max(...t) - Math.min(...t) > 3
-    ? `<div class="callout warn st-warn" role="note">Priemerná vonkajšia teplota sa medzi dňami líši o ${esc(f(Math.max(...t) - Math.min(...t)))} °C (od ${esc(f(Math.min(...t)))} do ${esc(f(Math.max(...t)))} °C). Porovnanie spotreby je menej spoľahlivé, pozri kWh na stupňo-deň.</div>` : "";
+  const temps = items.filter(it => it.has_data !== false).map(it => num(isObj(it.summary) ? it.summary.vonku : null)).filter(v => v !== null);
+  gid("st-cmp-warn").innerHTML = temps.length >= 2 && Math.max(...temps) - Math.min(...temps) > 3
+    ? `<div class="callout warn st-warn" role="note">${t("stats.porovnanie.varovanie", {d: f(Math.max(...temps) - Math.min(...temps)), a: f(Math.min(...temps)), b: f(Math.max(...temps))})}</div>` : "";
   drawCmpChart(); renderCmpTable(); updateExport();
 }
 function drawCmpChart() {
@@ -579,8 +592,8 @@ function drawCmpChart() {
     if (it.has_data !== false) arr(it.hours).forEach(h => { const hh = isObj(h) ? num(h.h) : null; if (hh !== null && hh >= 0 && hh < 24) vals[hh] = num(h[key]); });
     const id = "c:" + it.date; return {id, key, label: dayLabel(it), color: "--s" + (i + 1), w: i === 0 ? 3 : 1.8, xs, vals, aligned: true, hidden: !!hiddenSer[id], has: vals.some(v => v !== null), nodata: !vals.some(v => v !== null)}; });
   const head = `<div class="st-card-h"><div class="st-card-t">${esc(m.label)} <span class="mut" style="font-weight:400">${esc(m.unit)}</span></div><div class="st-leg">${mkLegend(series, "lg")}</div></div>`;
-  if (!series.some(s => s.has)) { host.innerHTML = `<div class="st-card" style="margin-top:0">${head}${nodata("Pre túto metriku nie sú vo vybraných dňoch dáta.")}</div>`; return; }
-  host.innerHTML = `<div class="st-card" style="margin-top:0">${head}<svg class="st-svg" data-p="cmp" role="img" aria-label="${esc(m.label)} podľa hodiny dňa, ${series.length} dní"></svg></div>`;
+  if (!series.some(s => s.has)) { host.innerHTML = `<div class="st-card" style="margin-top:0">${head}${nodata(t("stats.porovnanie.ziadne_data_metrika"))}</div>`; return; }
+  host.innerHTML = `<div class="st-card" style="margin-top:0">${head}<svg class="st-svg" data-p="cmp" role="img" aria-label="${esc(t("stats.porovnanie.aria_graf", {m: m.label, dni: tn("stats.spolocne.dni", series.length)}))}"></svg></div>`;
   const step = W < 620 ? 6 : 3, ticks = []; for (let h = 0; h < 24; h += step) ticks.push({x: h, label: pad2(h) + ":00"});
   const miss = []; for (let i = 0; i < 24; i++) if (series.every(s => s.vals[i] === null)) miss.push([i - .5, i + .5]);
   const p = {svg: host.querySelector("svg"), W, H: 280, series: series.filter(s => s.has), xmin: -.5, xmax: 23.5, ticks, zero: m.unit !== "°C", bars: false, minDx: 1, maxGap: 1.5, missing: miss, tol: .6, dots: false};
@@ -598,19 +611,19 @@ function renderCmpTable() {
   const defs = [], seen = new Set();
   for (const m of metricList()) if (sums.some(s => num(s[m.key]) !== null)) { defs.push(M(m.key)); seen.add(m.key); }
   for (const k of ["vonku_min", "vonku_max", "beh_pct", "tuv_max", "kwh_spotreba", "cop_kurenie", "cop_tuv", "hdd", "kwh_hdd", "hodin_s_datami", "poruch"]) if (!seen.has(k) && sums.some(s => num(s[k]) !== null)) defs.push(M(k));
-  const gorder = Object.keys(GROUPS), gi = g => { const i = gorder.indexOf(g); return i < 0 ? 99 : i; };
+  const gi = g => { const i = GROUP_KEYS.indexOf(g); return i < 0 ? 99 : i; };
   defs.sort((a, b) => gi(a.group) - gi(b.group));
-  if (!defs.length) { box.innerHTML = nodata("Vo vybraných dňoch nie sú žiadne dáta na porovnanie."); return; }
-  const head = `<tr><th>Ukazovateľ</th>` + items.map((it, i) => `<th class="${i === 0 ? "sel" : ""}"><i class="st-dot" style="background:var(--s${i + 1})"></i>${esc(it.label && it.label !== it.date ? it.label : fmtD(it.date))}<small>${esc(fmtD(it.date))}${it.has_data === false ? " · bez dát" : i === 0 ? " · základ" : ""}</small></th>`).join("") + `</tr>`;
+  if (!defs.length) { box.innerHTML = nodata(t("stats.porovnanie.ziadne_data_tabulka")); return; }
+  const head = `<tr><th>${t("stats.porovnanie.ukazovatel")}</th>` + items.map((it, i) => `<th class="${i === 0 ? "sel" : ""}"><i class="st-dot" style="background:var(--s${i + 1})"></i>${esc(it.label && it.label !== it.date ? it.label : fmtD(it.date))}<small>${esc(fmtD(it.date))}${it.has_data === false ? " · " + t("stats.spolocne.bez_dat") : i === 0 ? " · " + t("stats.porovnanie.zaklad") : ""}</small></th>`).join("") + `</tr>`;
   let body = "", lastG = null;
   for (const d of defs) {
-    if (d.group !== lastG) { lastG = d.group; body += `<tr class="sec"><td colspan="${items.length + 1}">${esc(GROUPS[d.group] || d.group)}</td></tr>`; }
+    if (d.group !== lastG) { lastG = d.group; body += `<tr class="sec"><td colspan="${items.length + 1}">${esc(grpName(d.group))}</td></tr>`; }
     const dec = num(d.decimals) === null ? 1 : d.decimals, base = num(sums[0][d.key]);
     body += `<tr><td>${esc(d.label)}${d.unit ? ` <span class="mut">${esc(d.unit)}</span>` : ""}</td>` + sums.map((s, i) => { const v = num(s[d.key]); let dif = "";
       if (i > 0 && v !== null && base !== null) { const ab = v - base, pc = base !== 0 ? ab / Math.abs(base) * 100 : null; dif = `<span class="st-dif">${esc(sf(ab, dec))}${d.unit ? " " + esc(d.unit) : ""}${pc !== null ? " · " + esc(sf(pc, 1)) + " %" : ""}</span>`; }
       return `<td class="${i === 0 ? "sel" : ""}">${esc(f(v, dec))}${dif}</td>`; }).join("") + `</tr>`;
   }
-  box.innerHTML = `<div class="st-scroll"><table class="st-tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div><p class="sub" style="margin:12px 0 0">Rozdiel je oproti prvému (základnému) dňu, absolútne aj v %. Bez hodnotenia, či je vyššia alebo nižšia hodnota lepšia.</p>`;
+  box.innerHTML = `<div class="st-scroll"><table class="st-tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div><p class="sub" style="margin:12px 0 0">${t("stats.porovnanie.poznamka")}</p>`;
 }
 function cmpChanged() {
   S.cmp = S.cmp.slice(0, 6); saveState(); updateExport(); renderCmpControls();
@@ -618,28 +631,28 @@ function cmpChanged() {
   loadCmp();
 }
 function cmpAdd(d, fromChip) {
-  if (!validD(d)) { setMsg("st-cmp-msg", "Zadaj platný dátum.", "err"); return; }
-  if (d > todayS()) { setMsg("st-cmp-msg", "Dátum nemôže byť v budúcnosti.", "err"); return; }
+  if (!validD(d)) { setMsg("st-cmp-msg", t("stats.porovnanie.platny_datum"), "err"); return; }
+  if (d > todayS()) { setMsg("st-cmp-msg", t("stats.porovnanie.buducnost"), "err"); return; }
   const i = S.cmp.indexOf(d);
-  if (i >= 0) { if (fromChip) { if (S.cmp.length < 2) { setMsg("st-cmp-msg", "Musí ostať aspoň jeden deň.", "err"); return; } S.cmp.splice(i, 1); cmpChanged(); } else setMsg("st-cmp-msg", "Tento deň už je vybraný.", "err"); return; }
-  if (S.cmp.length >= 6) { setMsg("st-cmp-msg", "Najviac 6 dní naraz. Najprv niektorý odober.", "err"); return; }
+  if (i >= 0) { if (fromChip) { if (S.cmp.length < 2) { setMsg("st-cmp-msg", t("stats.porovnanie.aspon_jeden"), "err"); return; } S.cmp.splice(i, 1); cmpChanged(); } else setMsg("st-cmp-msg", t("stats.porovnanie.uz_vybrany"), "err"); return; }
+  if (S.cmp.length >= 6) { setMsg("st-cmp-msg", t("stats.porovnanie.najviac_6"), "err"); return; }
   S.cmp.push(d); cmpChanged();
 }
 
 /* ---------- Obdobie ---------- */
 function rngParams() {
-  const t = todayS(); let from, to = t;
+  const td = todayS(); let from, to = td;
   switch (S.rngPreset) {
-    case "7": from = addDays(t, -6); break;
-    case "30": from = addDays(t, -29); break;
-    case "month": from = t.slice(0, 8) + "01"; break;
-    case "year": from = t.slice(0, 4) + "-01-01"; break;
+    case "7": from = addDays(td, -6); break;
+    case "30": from = addDays(td, -29); break;
+    case "month": from = td.slice(0, 8) + "01"; break;
+    case "year": from = td.slice(0, 4) + "-01-01"; break;
     default: from = S.rngFrom; to = S.rngTo;
   }
-  if (!validD(from) || !validD(to)) return {ok: false, msg: "Zadaj platný začiatok aj koniec obdobia."};
-  if (from > to) return {ok: false, msg: "Začiatok obdobia je po jeho konci."};
+  if (!validD(from) || !validD(to)) return {ok: false, msg: t("stats.obdobie.zadaj_platne")};
+  if (from > to) return {ok: false, msg: t("stats.obdobie.zaciatok_po_konci")};
   const days = Math.round((utcMs(to) - utcMs(from)) / 86400000) + 1;
-  if (S.rngGroup === "day" && days > 800) return {ok: false, msg: "Pre dennú granularitu je najviac 800 dní. Zvoľ týždeň alebo mesiac."};
+  if (S.rngGroup === "day" && days > 800) return {ok: false, msg: t("stats.obdobie.max_800")};
   return {ok: true, from, to, days};
 }
 const rngKey = () => { const p = rngParams(); return p.ok ? [p.from, p.to, S.rngGroup, S.rngYoy].join("|") : "x"; };
@@ -655,7 +668,7 @@ const shiftYearMs = ms => { const d = new Date(ms); return Date.UTC(d.getUTCFull
 const stepMs = g => g === "week" ? 7 * 86400000 : g === "month" ? 30.44 * 86400000 : 86400000;
 function rowLabel(r) {
   const st = rowStart(r), s = st === null ? "" : msToS(st);
-  if (S.rngGroup === "month" && s) return MONTHS[+s.slice(5, 7) - 1] + " " + s.slice(0, 4);
+  if (S.rngGroup === "month" && s) return t("stats.mesiac." + (+s.slice(5, 7))) + " " + s.slice(0, 4);
   if (S.rngGroup === "week") return String(r.key || "") + (s ? " (" + fmtDS(s) + (validD(String(r.to || "").slice(0, 10)) ? " – " + fmtDS(String(r.to).slice(0, 10)) : "") + ")" : "");
   return s ? fmtDW(s) + " " + s.slice(0, 4) : String(r.key || "");
 }
@@ -663,15 +676,15 @@ async function loadRng() {
   const p = rngParams(), my = ++seq.obdobie;
   updateExport();
   if (!p.ok) { D.rng = null; D.at.obdobie = 0; setMsg("st-rng-msg", p.msg, "err"); gid("st-rng-p2").hidden = true; gid("st-rng-p3").hidden = true; return; }
-  setMsg("st-rng-msg", "Načítavam…");
+  setMsg("st-rng-msg", t("stats.spolocne.nacitavam"));
   const cur = call("api/stats/range?" + q({from: p.from, to: p.to, group: S.rngGroup}));
   const prev = S.rngYoy ? call("api/stats/range?" + q({from: addYears(p.from, -1), to: addYears(p.to, -1), group: S.rngGroup})) : Promise.resolve(null);
   const res = await Promise.all([cur, prev]), r = res[0], pr = res[1];
   if (my !== seq.obdobie) return;
-  if (r.error || !Array.isArray(r.rows)) { D.rng = null; D.at.obdobie = 0; setMsg("st-rng-msg", "Obdobie sa nepodarilo načítať: " + (r.error || "neplatná odpoveď servera."), "err"); gid("st-rng-p2").hidden = true; gid("st-rng-p3").hidden = true; return; }
+  if (r.error || !Array.isArray(r.rows)) { D.rng = null; D.at.obdobie = 0; setMsg("st-rng-msg", t("stats.obdobie.chyba", {e: r.error || t("stats.spolocne.neplatna_odpoved")}), "err"); gid("st-rng-p2").hidden = true; gid("st-rng-p3").hidden = true; return; }
   D.rng = r; D.rngPrev = pr && !pr.error && Array.isArray(pr.rows) ? pr : null; D.rngPrevErr = !!pr && !D.rngPrev;
   D.at.obdobie = Date.now(); D.key.obdobie = rngKey();
-  setMsg("st-rng-msg", D.rngPrevErr ? "Údaje spred roka sa nepodarilo načítať, zobrazuje sa len zvolené obdobie." : "", D.rngPrevErr ? "err" : "");
+  setMsg("st-rng-msg", D.rngPrevErr ? t("stats.obdobie.rok_chyba") : "", D.rngPrevErr ? "err" : "");
   renderRng();
 }
 function renderRng() {
@@ -679,7 +692,7 @@ function renderRng() {
   const rows = arr(D.rng.rows).filter(isObj);
   gid("st-rng-p2").hidden = false; gid("st-rng-p3").hidden = false;
   const p = rngParams();
-  gid("st-rng-info").textContent = p.ok ? fmtD(p.from) + " – " + fmtD(p.to) + " · " + rows.length + " " + (S.rngGroup === "day" ? "dní" : S.rngGroup === "week" ? "týždňov" : "mesiacov") : "";
+  gid("st-rng-info").textContent = p.ok ? fmtD(p.from) + " – " + fmtD(p.to) + " · " + tn(S.rngGroup === "day" ? "stats.spolocne.dni" : S.rngGroup === "week" ? "stats.spolocne.tyzdne" : "stats.spolocne.mesiace", rows.length) : "";
   drawRngChart(); renderRngTable(); updateExport();
 }
 function drawRngChart() {
@@ -689,17 +702,17 @@ function drawRngChart() {
   const key = S.rngMetric, m = M(key), W = host.clientWidth, g = S.rngGroup, step = stepMs(g);
   const pts = arr(D.rng.rows).filter(isObj).map(r => ({r, x: rowStart(r)})).filter(pt => pt.x !== null);
   const valOf = r => num(r.dni_s_datami) === 0 ? null : num(r[key]);
-  const cur = {id: "r:cur", key, label: "Zvolené obdobie", color: "--copper", w: 2.4, xs: pts.map(pt => pt.x), vals: pts.map(pt => valOf(pt.r)), aligned: true, hidden: !!hiddenSer["r:cur"]};
+  const cur = {id: "r:cur", key, label: t("stats.obdobie.zvolene"), color: "--copper", w: 2.4, xs: pts.map(pt => pt.x), vals: pts.map(pt => valOf(pt.r)), aligned: true, hidden: !!hiddenSer["r:cur"]};
   cur.has = cur.vals.some(v => v !== null);
   const series = [cur]; let prevPts = [];
   if (S.rngYoy && D.rngPrev) {
     prevPts = arr(D.rngPrev.rows).filter(isObj).map(r => ({r, x: rowStart(r)})).filter(pt => pt.x !== null).map(pt => ({r: pt.r, x: shiftYearMs(pt.x)}));
-    const pv = {id: "r:prev", key, label: "Rovnaké obdobie pred rokom", color: "--cool", w: 2, xs: prevPts.map(pt => pt.x), vals: prevPts.map(pt => valOf(pt.r)), aligned: false, hidden: !!hiddenSer["r:prev"]};
+    const pv = {id: "r:prev", key, label: t("stats.obdobie.pred_rokom_dlho"), color: "--cool", w: 2, xs: prevPts.map(pt => pt.x), vals: prevPts.map(pt => valOf(pt.r)), aligned: false, hidden: !!hiddenSer["r:prev"]};
     pv.has = pv.vals.some(v => v !== null); series.push(pv);
   }
   const head = `<div class="st-card-h"><div class="st-card-t">${esc(m.label)} <span class="mut" style="font-weight:400">${esc(m.unit)}</span></div><div class="st-leg">${mkLegend(series.map(s => Object.assign({}, s, {nodata: !s.has})), "lg")}</div></div>`;
-  if (!pts.length || !series.some(s => s.has)) { host.innerHTML = `<div class="st-card" style="margin-top:0">${head}${nodata("Pre túto metriku nie sú v zvolenom období dáta.")}</div>`; return; }
-  host.innerHTML = `<div class="st-card" style="margin-top:0">${head}<svg class="st-svg" data-p="rng" role="img" aria-label="${esc(m.label)} v čase"></svg></div>`;
+  if (!pts.length || !series.some(s => s.has)) { host.innerHTML = `<div class="st-card" style="margin-top:0">${head}${nodata(t("stats.obdobie.ziadne_data_metrika"))}</div>`; return; }
+  host.innerHTML = `<div class="st-card" style="margin-top:0">${head}<svg class="st-svg" data-p="rng" role="img" aria-label="${esc(t("stats.obdobie.aria_graf", {m: m.label}))}"></svg></div>`;
   const allx = series.flatMap(s => s.xs);
   let xmin = Math.min(...allx), xmax = Math.max(...allx);
   if (xmax - xmin < 1) { xmin -= step; xmax += step; } else { xmin -= step / 2; xmax += step / 2; }
@@ -710,71 +723,71 @@ function drawRngChart() {
   const p = {svg: host.querySelector("svg"), W, H: 280, series: series.filter(s => s.has), xmin, xmax, ticks, zero: m.unit !== "°C", bars: false, minDx: step, maxGap: step * 1.6, missing: miss, tol: step * .6, dots: pts.length <= 45};
   drawPlot(p);
   const pvs = series[1];
-  const tip = i => { const pt = pts[i]; if (!pt) return ""; let html = `<b>${esc(rowLabel(pt.r))}</b>` + (cur.hidden ? "" : trow("--copper", "Zvolené obdobie", cur.vals[i] === null ? "–" : esc(fmu(key, cur.vals[i])), cur.vals[i] === null));
-    if (pvs && pvs.has && !pvs.hidden) { const j = nearIdx(pvs.xs, pt.x, step * .6); const v = j >= 0 ? pvs.vals[j] : null; html += trow("--cool", "Pred rokom", v === null ? "–" : esc(fmu(key, v)), v === null) + (j >= 0 ? `<div class="s">${esc(rowLabel(prevPts[j].r))}</div>` : ""); }
-    if (num(pt.r.dni_s_datami) !== null) html += `<hr><div class="s">Dní s dátami: ${f(pt.r.dni_s_datami, 0)}</div>`;
+  const tip = i => { const pt = pts[i]; if (!pt) return ""; let html = `<b>${esc(rowLabel(pt.r))}</b>` + (cur.hidden ? "" : trow("--copper", esc(t("stats.obdobie.zvolene")), cur.vals[i] === null ? "–" : esc(fmu(key, cur.vals[i])), cur.vals[i] === null));
+    if (pvs && pvs.has && !pvs.hidden) { const j = nearIdx(pvs.xs, pt.x, step * .6); const v = j >= 0 ? pvs.vals[j] : null; html += trow("--cool", esc(t("stats.obdobie.pred_rokom")), v === null ? "–" : esc(fmu(key, v)), v === null) + (j >= 0 ? `<div class="s">${esc(rowLabel(prevPts[j].r))}</div>` : ""); }
+    if (num(pt.r.dni_s_datami) !== null) html += `<hr><div class="s">${t("stats.obdobie.dni_s_datami_tip", {n: f(pt.r.dni_s_datami, 0)})}</div>`;
     return html; };
   attachGroup({plots: [p], xs: cur.xs, tip});
 }
 function renderRngTable() {
   const box = gid("st-rng-table"); if (!box || !D.rng) return;
   const rows = arr(D.rng.rows).filter(isObj), tot = isObj(D.rng.totals) ? D.rng.totals : {};
-  if (!rows.length) { box.innerHTML = nodata("V zvolenom období nie sú žiadne riadky."); return; }
+  if (!rows.length) { box.innerHTML = nodata(t("stats.obdobie.ziadne_riadky")); return; }
   const cols = [S.rngMetric].concat(RNG_COLS.filter(k => k !== S.rngMetric)).filter(k => rows.some(r => num(r[k]) !== null) || num(tot[k]) !== null);
-  const head = `<tr><th>Obdobie</th><th>Dní s dátami</th>` + cols.map(k => `<th class="${k === S.rngMetric ? "sel" : ""}">${esc(M(k).label)}<small>${esc(M(k).unit || "")}</small></th>`).join("") + `</tr>`;
+  const head = `<tr><th>${t("stats.obdobie.stlpec_obdobie")}</th><th>${t("stats.obdobie.dni_s_datami")}</th>` + cols.map(k => `<th class="${k === S.rngMetric ? "sel" : ""}">${esc(M(k).label)}<small>${esc(M(k).unit || "")}</small></th>`).join("") + `</tr>`;
   const body = rows.map(r => `<tr class="${num(r.dni_s_datami) === 0 ? "nodata" : ""}"><td>${esc(rowLabel(r))}</td><td>${f(r.dni_s_datami, 0)}</td>` + cols.map(k => `<td class="${k === S.rngMetric ? "sel" : ""}">${fm(k, r[k])}</td>`).join("") + `</tr>`).join("");
-  const foot = Object.keys(tot).length ? `<tr class="tot"><td>Spolu / Ø</td><td>${f(tot.dni_s_datami !== undefined ? tot.dni_s_datami : rows.reduce((a, r) => a + (num(r.dni_s_datami) || 0), 0), 0)}</td>` + cols.map(k => `<td class="${k === S.rngMetric ? "sel" : ""}">${fm(k, tot[k])}</td>`).join("") + `</tr>` : "";
-  box.innerHTML = `<div class="st-scroll"><table class="st-tbl"><thead>${head}</thead><tbody>${body}${foot}</tbody></table></div><p class="sub" style="margin:12px 0 0">Posledný riadok: súčty (spotreba, minúty, štarty) a priemery (teploty) za celé obdobie.</p>`;
+  const foot = Object.keys(tot).length ? `<tr class="tot"><td>${t("stats.obdobie.spolu")}</td><td>${f(tot.dni_s_datami !== undefined ? tot.dni_s_datami : rows.reduce((a, r) => a + (num(r.dni_s_datami) || 0), 0), 0)}</td>` + cols.map(k => `<td class="${k === S.rngMetric ? "sel" : ""}">${fm(k, tot[k])}</td>`).join("") + `</tr>` : "";
+  box.innerHTML = `<div class="st-scroll"><table class="st-tbl"><thead>${head}</thead><tbody>${body}${foot}</tbody></table></div><p class="sub" style="margin:12px 0 0">${t("stats.obdobie.poznamka")}</p>`;
 }
 
 /* ---------- Poruchy ---------- */
 function fltParams() {
-  const t = todayS();
+  const td = todayS();
   if (S.fltMode === "period") {
-    const from = validD(S.fltFrom) ? S.fltFrom : addDays(t, -30), to = validD(S.fltTo) ? S.fltTo : t;
-    if (from > to) return {ok: false, msg: "Začiatok obdobia je po jeho konci."};
+    const from = validD(S.fltFrom) ? S.fltFrom : addDays(td, -30), to = validD(S.fltTo) ? S.fltTo : td;
+    if (from > to) return {ok: false, msg: t("stats.obdobie.zaciatok_po_konci")};
     return {ok: true, from, to, open: false};
   }
-  return {ok: true, from: FAR_PAST, to: t, open: S.fltMode === "open"};
+  return {ok: true, from: FAR_PAST, to: td, open: S.fltMode === "open"};
 }
 const fltKey = () => { const p = fltParams(); return p.ok ? [p.from, p.to, p.open].join("|") : "x"; };
 function renderFlt() {
   const list = D.flt || [];
   gid("st-flt-count").textContent = list.length ? String(list.length) : "";
-  gid("st-flt-list").innerHTML = list.length ? faultsHtml(list, true) : nodata(S.fltMode === "open" ? "Žiadna otvorená porucha." : "V zvolenom období nie sú žiadne poruchy.");
+  gid("st-flt-list").innerHTML = list.length ? faultsHtml(list, true) : nodata(S.fltMode === "open" ? t("stats.poruchy.ziadna_otvorena") : t("stats.poruchy.ziadne_v_obdobi"));
 }
 async function loadFlt() {
   const p = fltParams(), my = ++seq.poruchy;
   if (!p.ok) { D.flt = null; D.at.poruchy = 0; setMsg("st-flt-msg", p.msg, "err"); gid("st-flt-list").innerHTML = ""; return; }
-  setMsg("st-flt-msg", "Načítavam…");
+  setMsg("st-flt-msg", t("stats.spolocne.nacitavam"));
   const r = await call("api/stats/faults?" + q({from: p.from, to: p.to, open: p.open ? 1 : undefined}));
   if (my !== seq.poruchy) return;
-  if (r.error || !Array.isArray(r.items)) { D.flt = null; D.at.poruchy = 0; setMsg("st-flt-msg", "Poruchy sa nepodarilo načítať: " + (r.error || "neplatná odpoveď servera."), "err"); gid("st-flt-list").innerHTML = ""; return; }
+  if (r.error || !Array.isArray(r.items)) { D.flt = null; D.at.poruchy = 0; setMsg("st-flt-msg", t("stats.poruchy.chyba", {e: r.error || t("stats.spolocne.neplatna_odpoved")}), "err"); gid("st-flt-list").innerHTML = ""; return; }
   D.flt = r.items.filter(isObj).slice().sort((a, b) => (num(b.ts_start) || 0) - (num(a.ts_start) || 0));
   D.at.poruchy = Date.now(); D.key.poruchy = fltKey(); setMsg("st-flt-msg", "");
   renderFlt();
 }
 function renderCodes() {
   const box = gid("st-codes-list"), dl = gid("st-codelist"); if (!box) return;
-  if (D.codes === false) { box.innerHTML = `<div class="st-msg err">Zoznam kódov sa nepodarilo načítať.</div>`; return; }
-  if (!D.codes) { box.innerHTML = `<div class="st-msg">Načítavam…</div>`; return; }
+  if (D.codes === false) { box.innerHTML = `<div class="st-msg err">${t("stats.kody.chyba")}</div>`; return; }
+  if (!D.codes) { box.innerHTML = `<div class="st-msg">${t("stats.spolocne.nacitavam")}</div>`; return; }
   dl.innerHTML = D.codes.map(c => `<option value="${esc(c.code)}">${esc(c.title || "")}</option>`).join("");
   box.innerHTML = `<div class="st-codes">` + D.codes.map(c => { const ro = c.editable === 0 || c.editable === false;
-    return `<div class="st-code" data-code="${esc(c.code)}"><div class="st-fh"><span class="tag">${esc(c.code)}</span>${ro ? `<span class="mut">len na čítanie</span>` : ""}</div>` +
-      `<div class="dgrid"><label class="dl">Názov<input class="in" data-f="title" maxlength="120" value="${esc(c.title || "")}"${ro ? " disabled" : ""}></label></div>` +
-      `<label class="dl">Popis<textarea data-f="description" maxlength="600"${ro ? " disabled" : ""}>${esc(c.description || "")}</textarea></label>` +
-      `<label class="dl">Čo robiť<textarea data-f="fix" maxlength="600"${ro ? " disabled" : ""}>${esc(c.fix || "")}</textarea></label>` +
-      (ro ? "" : `<div class="btnrow" style="margin-top:0"><button type="button" class="btn sm primary" data-act="code-save" data-code="${esc(c.code)}">Uložiť</button><span class="st-msg st-codemsg" role="status"></span></div>`) + `</div>`; }).join("") + `</div>`;
+    return `<div class="st-code" data-code="${esc(c.code)}"><div class="st-fh"><span class="tag">${esc(c.code)}</span>${ro ? `<span class="mut">${t("stats.kody.len_citanie")}</span>` : ""}</div>` +
+      `<div class="dgrid"><label class="dl">${t("stats.kody.nazov")}<input class="in" data-f="title" maxlength="120" value="${esc(c.title || "")}"${ro ? " disabled" : ""}></label></div>` +
+      `<label class="dl">${t("stats.kody.popis")}<textarea data-f="description" maxlength="600"${ro ? " disabled" : ""}>${esc(c.description || "")}</textarea></label>` +
+      `<label class="dl">${t("stats.porucha.fix_label")}<textarea data-f="fix" maxlength="600"${ro ? " disabled" : ""}>${esc(c.fix || "")}</textarea></label>` +
+      (ro ? "" : `<div class="btnrow" style="margin-top:0"><button type="button" class="btn sm primary" data-act="code-save" data-code="${esc(c.code)}">${t("stats.spolocne.ulozit")}</button><span class="st-msg st-codemsg" role="status"></span></div>`) + `</div>`; }).join("") + `</div>`;
 }
 async function loadCodes() {
   const r = await call("api/stats/codes");
   D.codes = r.error || !Array.isArray(r.items) ? false : r.items.filter(x => isObj(x) && x.code);
   renderCodes();
 }
-const delBtn = id => `<button type="button" class="btn sm danger" data-act="fault-ask" data-id="${esc(id)}">Zmazať</button>`;
+const delBtn = id => `<button type="button" class="btn sm danger" data-act="fault-ask" data-id="${esc(id)}">${t("stats.porucha.zmazat")}</button>`;
 function faultAsk(btn) {
   const box = btn.closest(".st-fa"); if (!box) return;
-  box.innerHTML = `<span class="st-ask" role="alertdialog" aria-label="Potvrdenie zmazania poruchy">Zmazať túto poruchu? <button type="button" class="btn sm danger" data-act="fault-yes" data-id="${esc(btn.dataset.id)}">Áno, zmazať</button><button type="button" class="btn sm" data-act="fault-no" data-id="${esc(btn.dataset.id)}">Nie</button></span>`;
+  box.innerHTML = `<span class="st-ask" role="alertdialog" aria-label="${t("stats.porucha.potvrdenie")}">${t("stats.porucha.zmazat_otazka")} <button type="button" class="btn sm danger" data-act="fault-yes" data-id="${esc(btn.dataset.id)}">${t("stats.porucha.ano_zmazat")}</button><button type="button" class="btn sm" data-act="fault-no" data-id="${esc(btn.dataset.id)}">${t("stats.porucha.nie")}</button></span>`;
   const y = box.querySelector("[data-act=fault-yes]"); if (y) y.focus();
 }
 function faultNo(btn) { const box = btn.closest(".st-fa"); if (!box) return; box.innerHTML = delBtn(btn.dataset.id); const b = box.querySelector("button"); if (b) b.focus(); }
@@ -794,38 +807,38 @@ function parseDT(s) {
 async function submitFault() {
   const from = gid("st-f-from").value.trim(), to = gid("st-f-to").value.trim(), code = gid("st-f-code").value.trim().toUpperCase(),
     title = gid("st-f-title").value.trim(), text = gid("st-f-text").value.trim(), a = parseDT(from), b = to ? parseDT(to) : null;
-  if (a === null) return setMsg("st-f-msg", "Čas „od“ zadaj v tvare RRRR-MM-DD HH:MM, napríklad 2026-11-12 14:30.", "err");
-  if (to && b === null) return setMsg("st-f-msg", "Čas „do“ zadaj v tvare RRRR-MM-DD HH:MM alebo ho nechaj prázdny.", "err");
-  if (b !== null && b < a) return setMsg("st-f-msg", "Koniec poruchy nemôže byť pred jej začiatkom.", "err");
-  if (!/^[A-Z0-9_-]{1,24}$/.test(code)) return setMsg("st-f-msg", "Zadaj kód poruchy (písmená, čísla, _ a -), napríklad E911.", "err");
+  if (a === null) return setMsg("st-f-msg", t("stats.pridat.cas_od"), "err");
+  if (to && b === null) return setMsg("st-f-msg", t("stats.pridat.cas_do"), "err");
+  if (b !== null && b < a) return setMsg("st-f-msg", t("stats.pridat.koniec_pred_zaciatkom"), "err");
+  if (!/^[A-Z0-9_-]{1,24}$/.test(code)) return setMsg("st-f-msg", t("stats.pridat.kod_poruchy"), "err");
   const body = {ts_start: from, code}; if (to) body.ts_end = to; if (title) body.title = title; if (text) body.text = text;
-  const go = gid("st-f-go"); go.disabled = true; setMsg("st-f-msg", "Ukladám…");
+  const go = gid("st-f-go"); go.disabled = true; setMsg("st-f-msg", t("stats.spolocne.ukladam"));
   const r = await call("api/stats/fault", body);
   go.disabled = false;
-  if (r.error) return setMsg("st-f-msg", "Poruchu sa nepodarilo zapísať: " + r.error, "err");
+  if (r.error) return setMsg("st-f-msg", t("stats.pridat.chyba", {e: r.error}), "err");
   gid("st-f-to").value = ""; gid("st-f-title").value = ""; gid("st-f-text").value = "";
-  setMsg("st-f-msg", "Porucha zapísaná.", "ok"); D.at.den = 0; loadFlt();
+  setMsg("st-f-msg", t("stats.pridat.zapisana"), "ok"); D.at.den = 0; loadFlt();
 }
 async function saveCode(btn) {
   const row = btn.closest(".st-code"), msg = row && row.querySelector(".st-codemsg"); if (!row) return;
   const val = k => { const el = row.querySelector(`[data-f="${k}"]`); return el ? el.value.trim() : ""; };
-  const title = val("title"); if (!title) { if (msg) { msg.textContent = "Názov nesmie byť prázdny."; msg.className = "st-msg err st-codemsg"; } return; }
-  btn.disabled = true; if (msg) { msg.textContent = "Ukladám…"; msg.className = "st-msg st-codemsg"; }
+  const title = val("title"); if (!title) { if (msg) { msg.textContent = t("stats.kody.nazov_prazdny"); msg.className = "st-msg err st-codemsg"; } return; }
+  btn.disabled = true; if (msg) { msg.textContent = t("stats.spolocne.ukladam"); msg.className = "st-msg st-codemsg"; }
   const r = await call("api/stats/fault_code", {code: btn.dataset.code, title, description: val("description"), fix: val("fix")});
   btn.disabled = false;
-  if (msg) { msg.textContent = r.error ? "Nepodarilo sa uložiť: " + r.error : "Uložené."; msg.className = "st-msg " + (r.error ? "err" : "ok") + " st-codemsg"; }
+  if (msg) { msg.textContent = r.error ? t("stats.kody.nepodarilo_ulozit", {e: r.error}) : t("stats.spolocne.ulozene"); msg.className = "st-msg " + (r.error ? "err" : "ok") + " st-codemsg"; }
   if (!r.error) { D.at.den = 0; D.at.poruchy = 0; }
 }
 async function newCode(btn) {
   const code = gid("st-nc-code").value.trim().toUpperCase(), title = gid("st-nc-title").value.trim();
-  if (!/^[A-Z0-9_-]{1,24}$/.test(code)) return setMsg("st-nc-msg", "Zadaj kód (písmená, čísla, _ a -).", "err");
-  if (!title) return setMsg("st-nc-msg", "Zadaj názov.", "err");
-  btn.disabled = true; setMsg("st-nc-msg", "Ukladám…");
+  if (!/^[A-Z0-9_-]{1,24}$/.test(code)) return setMsg("st-nc-msg", t("stats.kody.zadaj_kod"), "err");
+  if (!title) return setMsg("st-nc-msg", t("stats.kody.zadaj_nazov"), "err");
+  btn.disabled = true; setMsg("st-nc-msg", t("stats.spolocne.ukladam"));
   const r = await call("api/stats/fault_code", {code, title, description: gid("st-nc-desc").value.trim(), fix: gid("st-nc-fix").value.trim()});
   btn.disabled = false;
-  if (r.error) return setMsg("st-nc-msg", "Nepodarilo sa uložiť: " + r.error, "err");
+  if (r.error) return setMsg("st-nc-msg", t("stats.kody.nepodarilo_ulozit", {e: r.error}), "err");
   for (const id of ["st-nc-code", "st-nc-title", "st-nc-desc", "st-nc-fix"]) gid(id).value = "";
-  setMsg("st-nc-msg", "Kód uložený.", "ok"); D.at.den = 0; D.at.poruchy = 0; loadCodes();
+  setMsg("st-nc-msg", t("stats.kody.ulozeny"), "ok"); D.at.den = 0; D.at.poruchy = 0; loadCodes();
 }
 
 /* ---------- prepínanie pohľadov, načítanie, kreslenie ---------- */
@@ -833,10 +846,10 @@ function redraw() {
   if (S.view === "den") drawDayCharts(); else if (S.view === "porovnanie") drawCmpChart(); else if (S.view === "obdobie") drawRngChart();
 }
 function syncControls() {
-  const t = todayS();
-  const day = gid("st-day"); day.value = S.day; day.max = t;
-  gid("st-next").disabled = S.day >= t;
-  gid("st-cmp-base").max = t; gid("st-cmp-new").max = t; gid("st-cmp-base").value = S.cmp[0] || "";
+  const td = todayS();
+  const day = gid("st-day"); day.value = S.day; day.max = td;
+  gid("st-next").disabled = S.day >= td;
+  gid("st-cmp-base").max = td; gid("st-cmp-new").max = td; gid("st-cmp-base").value = S.cmp[0] || "";
   fillMetricSelects();
   root.querySelectorAll("#st-views button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === S.view)));
   root.querySelectorAll("#st-rng-presets button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.p === S.rngPreset)));
@@ -846,9 +859,9 @@ function syncControls() {
   gid("st-rng-yoy").checked = S.rngYoy;
   gid("st-rng-custom").hidden = S.rngPreset !== "custom";
   if (S.rngPreset === "custom") { gid("st-rng-from").value = S.rngFrom; gid("st-rng-to").value = S.rngTo; }
-  gid("st-rng-from").max = t; gid("st-rng-to").max = t; gid("st-flt-from").max = t; gid("st-flt-to").max = t;
+  gid("st-rng-from").max = td; gid("st-rng-to").max = td; gid("st-flt-from").max = td; gid("st-flt-to").max = td;
   gid("st-flt-period").hidden = S.fltMode !== "period";
-  gid("st-flt-from").value = validD(S.fltFrom) ? S.fltFrom : addDays(t, -30); gid("st-flt-to").value = validD(S.fltTo) ? S.fltTo : t;
+  gid("st-flt-from").value = validD(S.fltFrom) ? S.fltFrom : addDays(td, -30); gid("st-flt-to").value = validD(S.fltTo) ? S.fltTo : td;
   if (!gid("st-f-from").value) { const n = new Date(); gid("st-f-from").value = dstr(n) + " " + pad2(n.getHours()) + ":" + pad2(n.getMinutes()); }
 }
 function loadView(v, force) {
@@ -861,10 +874,10 @@ function loadView(v, force) {
   else if (v === "poruchy") { if (D.codes === null) loadCodes(); else renderCodes(); if (D.flt && fresh(fltKey())) renderFlt(); else loadFlt(); }
 }
 function setView(v, noLoad) {
-  if (!VIEWS.some(x => x[0] === v)) v = "den";
+  if (!VIEWS.includes(v)) v = "den";
   S.view = v; saveState();
   root.querySelectorAll("#st-views button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
-  for (const x of VIEWS) gid("st-v-" + x[0]).hidden = x[0] !== v;
+  for (const x of VIEWS) gid("st-v-" + x).hidden = x !== v;
   tipHide(); updateExport();
   if (!noLoad) loadView(v, false);
 }
@@ -884,7 +897,7 @@ function onClick(e) {
   else if (a === "col") { const g = b.dataset.g; if (g in S.cols) { S.cols[g] = !S.cols[g]; b.setAttribute("aria-pressed", String(S.cols[g])); saveState(); renderHours(); } }
   else if (a === "lg") toggleSeries(b.dataset.sid);
   else if (a === "cmp-chip") cmpAdd(b.dataset.d, true);
-  else if (a === "cmp-add") { const v = gid("st-cmp-new").value; if (!v) { setMsg("st-cmp-msg", "Vyber dátum, ktorý chceš pridať.", "err"); return; } setMsg("st-cmp-msg", ""); cmpAdd(v, false); gid("st-cmp-new").value = ""; }
+  else if (a === "cmp-add") { const v = gid("st-cmp-new").value; if (!v) { setMsg("st-cmp-msg", t("stats.porovnanie.vyber_datum"), "err"); return; } setMsg("st-cmp-msg", ""); cmpAdd(v, false); gid("st-cmp-new").value = ""; }
   else if (a === "cmp-del") { const i = S.cmp.indexOf(b.dataset.d); if (i >= 0 && S.cmp.length > 1) { S.cmp.splice(i, 1); setMsg("st-cmp-msg", ""); cmpChanged(); } }
   else if (a === "rng-preset") { S.rngPreset = b.dataset.p;
     if (S.rngPreset === "custom" && !(validD(S.rngFrom) && validD(S.rngTo))) { S.rngTo = todayS(); S.rngFrom = addDays(S.rngTo, -29); }
@@ -898,17 +911,17 @@ function onClick(e) {
   else if (a === "code-new") newCode(b);
 }
 function onChange(e) {
-  const t = e.target, id = t.id;
-  if (id === "st-day") { if (validD(t.value)) gotoDay(t.value); else t.value = S.day; }
+  const el = e.target, id = el.id;
+  if (id === "st-day") { if (validD(el.value)) gotoDay(el.value); else el.value = S.day; }
   else if (id === "st-cmp-base") {
-    if (!validD(t.value) || t.value > todayS()) { t.value = S.cmp[0] || ""; return; }
-    S.cmp = [t.value].concat(S.cmp.slice(1).filter(d => d !== t.value)); setMsg("st-cmp-msg", ""); cmpChanged();
+    if (!validD(el.value) || el.value > todayS()) { el.value = S.cmp[0] || ""; return; }
+    S.cmp = [el.value].concat(S.cmp.slice(1).filter(d => d !== el.value)); setMsg("st-cmp-msg", ""); cmpChanged();
   }
-  else if (id === "st-cmp-metric") { S.cmpMetric = t.value; saveState(); drawCmpChart(); }
-  else if (id === "st-rng-from" || id === "st-rng-to") { if (id === "st-rng-from") S.rngFrom = validD(t.value) ? t.value : ""; else S.rngTo = validD(t.value) ? t.value : ""; S.rngPreset = "custom"; saveState(); loadRng(); }
-  else if (id === "st-rng-metric") { S.rngMetric = t.value; saveState(); renderRng(); }
-  else if (id === "st-rng-yoy") { S.rngYoy = t.checked; saveState(); loadRng(); }
-  else if (id === "st-flt-from" || id === "st-flt-to") { if (id === "st-flt-from") S.fltFrom = validD(t.value) ? t.value : ""; else S.fltTo = validD(t.value) ? t.value : ""; saveState(); loadFlt(); }
+  else if (id === "st-cmp-metric") { S.cmpMetric = el.value; saveState(); drawCmpChart(); }
+  else if (id === "st-rng-from" || id === "st-rng-to") { if (id === "st-rng-from") S.rngFrom = validD(el.value) ? el.value : ""; else S.rngTo = validD(el.value) ? el.value : ""; S.rngPreset = "custom"; saveState(); loadRng(); }
+  else if (id === "st-rng-metric") { S.rngMetric = el.value; saveState(); renderRng(); }
+  else if (id === "st-rng-yoy") { S.rngYoy = el.checked; saveState(); loadRng(); }
+  else if (id === "st-flt-from" || id === "st-flt-to") { if (id === "st-flt-from") S.fltFrom = validD(el.value) ? el.value : ""; else S.fltTo = validD(el.value) ? el.value : ""; saveState(); loadFlt(); }
 }
 function onKey(e) {
   if (!visible || S.view !== "den" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -924,92 +937,92 @@ function build() {
   const seg = (id, label, act, key, items) => `<div class="st-seg" id="${id}" role="group" aria-label="${label}">` + items.map(i => `<button type="button" data-act="${act}" data-${key}="${i[0]}" aria-pressed="false">${i[1]}</button>`).join("") + `</div>`;
   host.innerHTML =
 `<section class="panel pad st-head">
-  <div class="st-bar"><h2>Štatistiky</h2>${seg("st-views", "Pohľad", "view", "v", VIEWS)}<span class="st-grow"></span><a class="btn" id="st-export" href="#" rel="noopener">Export CSV</a></div>
-  <div class="st-cov" id="st-cov" role="status">Načítavam dostupnosť dát…</div>
+  <div class="st-bar"><h2>${t("stats.titul")}</h2>${seg("st-views", t("stats.pohlad.aria"), "view", "v", VIEWS.map(k => [k, t("stats.pohlad." + k)]))}<span class="st-grow"></span><a class="btn" id="st-export" href="#" rel="noopener">${t("stats.export.csv")}</a></div>
+  <div class="st-cov" id="st-cov" role="status">${t("stats.pokrytie.nacitavam")}</div>
 </section>
 <div class="st-view" id="st-v-den" hidden>
   <section class="panel pad">
     <div class="st-bar"><div class="st-title" id="st-day-title"></div><span id="st-day-badge"></span><span class="st-grow"></span>
-      <div class="st-nav"><button type="button" class="btn icon" id="st-prev" data-act="day-prev" aria-label="Predošlý deň" title="Predošlý deň (←)">‹</button><input type="date" id="st-day" aria-label="Dátum"><button type="button" class="btn icon" id="st-next" data-act="day-next" aria-label="Nasledujúci deň" title="Nasledujúci deň (→)">›</button><button type="button" class="btn" id="st-today" data-act="day-today">Dnes</button></div></div>
+      <div class="st-nav"><button type="button" class="btn icon" id="st-prev" data-act="day-prev" aria-label="${t("stats.den.predosly")}" title="${t("stats.den.predosly_tip")}">‹</button><input type="date" id="st-day" aria-label="${t("stats.den.datum")}"><button type="button" class="btn icon" id="st-next" data-act="day-next" aria-label="${t("stats.den.nasledujuci")}" title="${t("stats.den.nasledujuci_tip")}">›</button><button type="button" class="btn" id="st-today" data-act="day-today">${t("stats.den.dnes")}</button></div></div>
     <div class="st-msg" id="st-day-msg" role="status" style="margin-top:8px"></div>
     <div id="st-day-sum">
-      <div class="st-nod" id="st-day-nodata" hidden>Pre tento deň nie sú žiadne dáta.</div>
+      <div class="st-nod" id="st-day-nodata" hidden>${t("stats.den.ziadne_data")}</div>
       <div class="stats st-stats" id="st-day-tiles"></div><div id="st-day-rooms"></div>
-      <div id="st-day-tlwrap"><p class="st-h3" style="margin-top:24px">Časová os dňa</p><div id="st-day-tl"></div></div>
+      <div id="st-day-tlwrap"><p class="st-h3" style="margin-top:24px">${t("stats.den.casova_os")}</p><div id="st-day-tl"></div></div>
     </div>
   </section>
-  <section class="panel pad" id="st-day-pcal"><div class="st-sub"><h2>Kalibrácia spotreby</h2><span class="sub">podľa elektromera celého domu</span></div><div id="st-day-cal"></div></section>
-  <section class="panel pad" id="st-day-p2"><div class="st-sub"><h2>Grafy</h2><span class="sub">Spoločný kurzor; legendou možno rady vypínať. Chýbajúce údaje sú šedé pásy, nie nula.</span></div><div id="st-day-charts"></div></section>
-  <section class="panel pad" id="st-day-p3"><div class="st-sub"><h2>Hodina po hodine</h2><span class="sub" id="st-hours-info"></span></div>
-    <div class="st-cols" id="st-day-cols" role="group" aria-label="Skupiny stĺpcov">${colGroups().map(g => `<button type="button" class="chip st-ch" data-act="col" data-g="${g[0]}" aria-pressed="${!!S.cols[g[0]]}">${g[1]}</button>`).join("")}</div>
+  <section class="panel pad" id="st-day-pcal"><div class="st-sub"><h2>${t("stats.kal.titul")}</h2><span class="sub">${t("stats.kal.podtitul")}</span></div><div id="st-day-cal"></div></section>
+  <section class="panel pad" id="st-day-p2"><div class="st-sub"><h2>${t("stats.den.grafy")}</h2><span class="sub">${t("stats.den.grafy_info")}</span></div><div id="st-day-charts"></div></section>
+  <section class="panel pad" id="st-day-p3"><div class="st-sub"><h2>${t("stats.den.hodina_po_hodine")}</h2><span class="sub" id="st-hours-info"></span></div>
+    <div class="st-cols" id="st-day-cols" role="group" aria-label="${t("stats.den.skupiny_stlpcov")}">${colGroups().map(g => `<button type="button" class="chip st-ch" data-act="col" data-g="${g[0]}" aria-pressed="${!!S.cols[g[0]]}">${g[1]}</button>`).join("")}</div>
     <div class="st-scroll" id="st-day-hours"></div></section>
-  <section class="panel pad" id="st-day-p4"><div class="st-sub"><h2>Cykly kompresora</h2><span class="sub" id="st-cyc-info"></span></div><div class="st-scroll" id="st-day-cycles"></div></section>
-  <section class="panel pad" id="st-day-p5"><div class="st-sub"><h2>Poruchy dňa</h2><span class="sub" id="st-dfault-info"></span></div><div id="st-day-faults"></div></section>
+  <section class="panel pad" id="st-day-p4"><div class="st-sub"><h2>${t("stats.cykly.titul")}</h2><span class="sub" id="st-cyc-info"></span></div><div class="st-scroll" id="st-day-cycles"></div></section>
+  <section class="panel pad" id="st-day-p5"><div class="st-sub"><h2>${t("stats.den.poruchy_dna")}</h2><span class="sub" id="st-dfault-info"></span></div><div id="st-day-faults"></div></section>
 </div>
 <div class="st-view" id="st-v-porovnanie" hidden>
   <section class="panel pad">
-    <div class="st-sub"><h2>Porovnanie dní</h2><span class="sub">Až 6 dní naraz; rozdiely sa počítajú oproti prvému dňu.</span></div>
+    <div class="st-sub"><h2>${t("stats.porovnanie.titul")}</h2><span class="sub">${t("stats.porovnanie.podtitul")}</span></div>
     <div class="st-ctl">
-      <label class="st-fld">Základný deň<input type="date" class="in" id="st-cmp-base"></label>
-      <div class="st-fld"><label for="st-cmp-new">Pridať iný deň</label><div class="st-nav"><input type="date" class="in" id="st-cmp-new"><button type="button" class="btn sm" id="st-cmp-add" data-act="cmp-add">Pridať</button></div></div>
-      <label class="st-fld">Metrika<select class="sel" id="st-cmp-metric"></select></label>
+      <label class="st-fld">${t("stats.porovnanie.zakladny_den")}<input type="date" class="in" id="st-cmp-base"></label>
+      <div class="st-fld"><label for="st-cmp-new">${t("stats.porovnanie.pridat_iny")}</label><div class="st-nav"><input type="date" class="in" id="st-cmp-new"><button type="button" class="btn sm" id="st-cmp-add" data-act="cmp-add">${t("stats.porovnanie.pridat")}</button></div></div>
+      <label class="st-fld">${t("stats.spolocne.metrika")}<select class="sel" id="st-cmp-metric"></select></label>
     </div>
-    <p class="st-h3" style="margin-top:20px">Rýchle voľby voči základnému dňu</p><div class="st-chips" id="st-cmp-quick"></div>
-    <p class="st-h3" style="margin-top:20px">Vybrané dni</p><div class="st-selected" id="st-cmp-sel"></div>
+    <p class="st-h3" style="margin-top:20px">${t("stats.porovnanie.rychle")}</p><div class="st-chips" id="st-cmp-quick"></div>
+    <p class="st-h3" style="margin-top:20px">${t("stats.porovnanie.vybrane")}</p><div class="st-selected" id="st-cmp-sel"></div>
     <div class="st-msg" id="st-cmp-msg" role="status" style="margin-top:10px"></div>
   </section>
   <section class="panel pad" id="st-cmp-p2"><div id="st-cmp-warn"></div><div id="st-cmp-chart" style="margin-top:12px"></div></section>
-  <section class="panel pad" id="st-cmp-p3"><div class="st-sub"><h2>Porovnanie súhrnov</h2></div><div id="st-cmp-table"></div></section>
+  <section class="panel pad" id="st-cmp-p3"><div class="st-sub"><h2>${t("stats.porovnanie.suhrny")}</h2></div><div id="st-cmp-table"></div></section>
 </div>
 <div class="st-view" id="st-v-obdobie" hidden>
   <section class="panel pad">
-    <div class="st-sub"><h2>Obdobie</h2><span class="sub" id="st-rng-info"></span></div>
+    <div class="st-sub"><h2>${t("stats.pohlad.obdobie")}</h2><span class="sub" id="st-rng-info"></span></div>
     <div class="st-ctl">
-      <div class="st-fld"><span>Rozsah</span>${seg("st-rng-presets", "Rozsah", "rng-preset", "p", [["7", "7 dní"], ["30", "30 dní"], ["month", "Tento mesiac"], ["year", "Tento rok"], ["custom", "Vlastný"]])}</div>
-      <div class="st-fld"><span>Granularita</span>${seg("st-rng-groups", "Granularita", "rng-grp", "g", [["day", "Deň"], ["week", "Týždeň"], ["month", "Mesiac"]])}</div>
+      <div class="st-fld"><span>${t("stats.obdobie.rozsah")}</span>${seg("st-rng-presets", t("stats.obdobie.rozsah"), "rng-preset", "p", [["7", t("stats.obdobie.p7")], ["30", t("stats.obdobie.p30")], ["month", t("stats.obdobie.mesiac_tento")], ["year", t("stats.obdobie.rok_tento")], ["custom", t("stats.obdobie.vlastny")]])}</div>
+      <div class="st-fld"><span>${t("stats.obdobie.granularita")}</span>${seg("st-rng-groups", t("stats.obdobie.granularita"), "rng-grp", "g", [["day", t("stats.obdobie.g_den")], ["week", t("stats.obdobie.g_tyzden")], ["month", t("stats.obdobie.g_mesiac")]])}</div>
     </div>
     <div class="st-ctl" id="st-rng-custom" style="margin-top:12px" hidden>
-      <label class="st-fld">Od<input type="date" class="in" id="st-rng-from"></label><label class="st-fld">Do<input type="date" class="in" id="st-rng-to"></label>
+      <label class="st-fld">${t("stats.spolocne.od")}<input type="date" class="in" id="st-rng-from"></label><label class="st-fld">${t("stats.spolocne.do")}<input type="date" class="in" id="st-rng-to"></label>
     </div>
     <div class="st-ctl" style="margin-top:12px">
-      <label class="st-fld">Metrika<select class="sel" id="st-rng-metric"></select></label>
-      <label class="st-chk"><span class="sw"><input type="checkbox" id="st-rng-yoy"><i></i></span>Porovnať s rovnakým obdobím minulého roka</label>
+      <label class="st-fld">${t("stats.spolocne.metrika")}<select class="sel" id="st-rng-metric"></select></label>
+      <label class="st-chk"><span class="sw"><input type="checkbox" id="st-rng-yoy"><i></i></span>${t("stats.obdobie.porovnat_rok")}</label>
     </div>
     <div class="st-msg" id="st-rng-msg" role="status" style="margin-top:10px"></div>
   </section>
   <section class="panel pad" id="st-rng-p2"><div id="st-rng-chart"></div></section>
-  <section class="panel pad" id="st-rng-p3"><div class="st-sub"><h2>Tabuľka</h2></div><div id="st-rng-table"></div></section>
+  <section class="panel pad" id="st-rng-p3"><div class="st-sub"><h2>${t("stats.obdobie.tabulka")}</h2></div><div id="st-rng-table"></div></section>
 </div>
 <div class="st-view" id="st-v-poruchy" hidden>
   <section class="panel pad">
-    <div class="st-sub"><h2>Poruchy</h2><span class="sub" id="st-flt-count"></span></div>
-    <div class="st-ctl">${seg("st-flt-modes", "Filter porúch", "flt-mode", "m", [["open", "Len otvorené"], ["all", "Všetky"], ["period", "Obdobie"]])}
-      <div class="st-ctl" id="st-flt-period" hidden><label class="st-fld">Od<input type="date" class="in" id="st-flt-from"></label><label class="st-fld">Do<input type="date" class="in" id="st-flt-to"></label></div></div>
+    <div class="st-sub"><h2>${t("stats.pohlad.poruchy")}</h2><span class="sub" id="st-flt-count"></span></div>
+    <div class="st-ctl">${seg("st-flt-modes", t("stats.poruchy.filter"), "flt-mode", "m", [["open", t("stats.poruchy.len_otvorene")], ["all", t("stats.poruchy.vsetky")], ["period", t("stats.pohlad.obdobie")]])}
+      <div class="st-ctl" id="st-flt-period" hidden><label class="st-fld">${t("stats.spolocne.od")}<input type="date" class="in" id="st-flt-from"></label><label class="st-fld">${t("stats.spolocne.do")}<input type="date" class="in" id="st-flt-to"></label></div></div>
     <div class="st-msg" id="st-flt-msg" role="status" style="margin-top:10px"></div>
     <div id="st-flt-list" style="margin-top:8px"></div>
   </section>
   <section class="panel pad">
-    <div class="st-sub"><h2>Pridať poruchu ručne</h2><span class="sub">Napríklad chyba z ovládača, ktorú Home Assistant nezachytí.</span></div>
+    <div class="st-sub"><h2>${t("stats.pridat.titul")}</h2><span class="sub">${t("stats.pridat.podtitul")}</span></div>
     <form id="st-fform" autocomplete="off" novalidate>
       <div class="dgrid">
-        <label class="dl">Od (RRRR-MM-DD HH:MM)<input class="in" id="st-f-from" placeholder="2026-11-12 14:30" maxlength="16"></label>
-        <label class="dl">Do (nepovinné)<input class="in" id="st-f-to" placeholder="2026-11-12 16:00" maxlength="16"></label>
-        <label class="dl">Kód<input class="in" id="st-f-code" list="st-codelist" maxlength="24" placeholder="napríklad E911"></label>
-        <label class="dl">Názov (nepovinné)<input class="in" id="st-f-title" maxlength="120"></label>
+        <label class="dl">${t("stats.pridat.od")}<input class="in" id="st-f-from" placeholder="2026-11-12 14:30" maxlength="16"></label>
+        <label class="dl">${t("stats.pridat.do")}<input class="in" id="st-f-to" placeholder="2026-11-12 16:00" maxlength="16"></label>
+        <label class="dl">${t("stats.pridat.kod")}<input class="in" id="st-f-code" list="st-codelist" maxlength="24" placeholder="${t("stats.pridat.kod_priklad")}"></label>
+        <label class="dl">${t("stats.pridat.nazov")}<input class="in" id="st-f-title" maxlength="120"></label>
       </div>
-      <label class="dl" style="margin-top:12px">Poznámka<textarea class="st-ta" id="st-f-text" maxlength="600" rows="2"></textarea></label>
-      <div class="btnrow"><button type="submit" class="btn primary" id="st-f-go">Pridať poruchu</button><span class="st-msg" id="st-f-msg" role="status"></span></div>
+      <label class="dl" style="margin-top:12px">${t("stats.pridat.poznamka")}<textarea class="st-ta" id="st-f-text" maxlength="600" rows="2"></textarea></label>
+      <div class="btnrow"><button type="submit" class="btn primary" id="st-f-go">${t("stats.pridat.tlacidlo")}</button><span class="st-msg" id="st-f-msg" role="status"></span></div>
     </form>
     <datalist id="st-codelist"></datalist>
   </section>
   <section class="panel pad">
-    <details id="st-codes"><summary>Zoznam kódov porúch: úprava názvov, popisov a postupu</summary>
+    <details id="st-codes"><summary>${t("stats.kody.titul")}</summary>
       <div id="st-codes-list" style="margin-top:12px"></div>
-      <div class="st-code" style="margin-top:6px"><div class="st-fh"><b class="t">Nový kód</b></div>
-        <div class="dgrid"><label class="dl">Kód<input class="in" id="st-nc-code" maxlength="24"></label><label class="dl">Názov<input class="in" id="st-nc-title" maxlength="120"></label></div>
-        <label class="dl">Popis<textarea class="st-ta" id="st-nc-desc" maxlength="600"></textarea></label>
-        <label class="dl">Čo robiť<textarea class="st-ta" id="st-nc-fix" maxlength="600"></textarea></label>
-        <div class="btnrow" style="margin-top:0"><button type="button" class="btn sm primary" data-act="code-new">Pridať kód</button><span class="st-msg" id="st-nc-msg" role="status"></span></div></div>
+      <div class="st-code" style="margin-top:6px"><div class="st-fh"><b class="t">${t("stats.kody.novy")}</b></div>
+        <div class="dgrid"><label class="dl">${t("stats.pridat.kod")}<input class="in" id="st-nc-code" maxlength="24"></label><label class="dl">${t("stats.kody.nazov")}<input class="in" id="st-nc-title" maxlength="120"></label></div>
+        <label class="dl">${t("stats.kody.popis")}<textarea class="st-ta" id="st-nc-desc" maxlength="600"></textarea></label>
+        <label class="dl">${t("stats.porucha.fix_label")}<textarea class="st-ta" id="st-nc-fix" maxlength="600"></textarea></label>
+        <div class="btnrow" style="margin-top:0"><button type="button" class="btn sm primary" data-act="code-new">${t("stats.kody.pridat")}</button><span class="st-msg" id="st-nc-msg" role="status"></span></div></div>
     </details>
   </section>
 </div>`;
@@ -1020,7 +1033,7 @@ function build() {
   const tl = gid("st-day-tl");
   tl.addEventListener("pointermove", ev => { const el = ev.target.closest ? ev.target.closest("i[data-i]") : null, x = el && tl._tl ? tl._tl[+el.dataset.i] : null;
     if (!x) { tipHide(); return; }
-    tipShow(`<b>${hm(x.from)} – ${hm(x.to)}</b>` + trow(null, esc(TL_STATE[x.state] || x.state), esc(dur((x.to - x.from) / 60))), ev.clientX, ev.clientY); });
+    tipShow(`<b>${hm(x.from)} – ${hm(x.to)}</b>` + trow(null, esc(tlName(x.state) || x.state), esc(dur((x.to - x.from) / 60))), ev.clientX, ev.clientY); });
   tl.addEventListener("pointerleave", tipHide);
   loadState();
   built = true; D.codes = null;

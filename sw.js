@@ -1,6 +1,6 @@
 // Service worker pre Web Push. Bez cachovania.
-// Verzia: zmena tohto riadku vynuti aktualizaciu service workera (v2.0: profil instalacie, novy ui.html).
-var SW_VERSION = "2.0.0-profil-1";
+// Verzia: zmena tohto riadku vynuti aktualizaciu service workera (v2.2: jazyky webu, novy ui.html).
+var SW_VERSION = "2.2.0-i18n-1";
 // iOS vyzaduje showNotification pri KAZDOM push (ziadne tiche pushe).
 self.addEventListener("install", function () {
   self.skipWaiting();

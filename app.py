@@ -1122,6 +1122,7 @@ MANIFEST = {"name": "Kúrenie", "short_name": "Kúrenie", "start_url": "/", "sco
             "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
                       {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
                       {"src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}
+LOCALE_RE = re.compile(r"^/locales/[a-z]{2}\.json$")   # jazykové súbory webu (SPEC_i18n)
 STATS_GROUPS = ("day", "week", "month")
 STATS_NA = "Modul štatistík nie je nainštalovaný."
 STATS_MAX_SPAN = 3660   # dní; najdlhšie obdobie v jednom dotaze (10 rokov)
@@ -1580,6 +1581,8 @@ class H(BaseHTTPRequestHandler):
                     c.close()
             if u.path in STATS_STATIC:   # statické súbory štatistík: bez prihlásenia, ako ui.html
                 return self.stats_static(u.path)
+            if LOCALE_RE.match(u.path):   # prekladové súbory webu (locales/xx.json): bez prihlásenia, ako ui.html
+                return self.static_locale(u.path)
             if u.path in STATIC or u.path == "/manifest.webmanifest":   # ikony a manifest PWA: bez prihlásenia
                 return self.static_icon(u.path)
             if u.path == "/sw.js":   # service worker pre Web Push: bez prihlásenia, scope celý web
@@ -1945,6 +1948,14 @@ class H(BaseHTTPRequestHandler):
             return self.send(404, {"error": "not found"})
         with open(fp, "rb") as f:
             return self.send(200, f.read(), "application/javascript; charset=utf-8", headers=[("Service-Worker-Allowed", "/")], cache="no-cache")
+
+    def static_locale(self, path):
+        # názov súboru je overený regulárnym výrazom ^/locales/[a-z]{2}\.json$ (žiadny path traversal)
+        fp = os.path.join(ROOT, "locales", path.rsplit("/", 1)[1])
+        if not os.path.isfile(fp):
+            return self.send(404, {"error": "not found"})
+        with open(fp, "rb") as f:
+            return self.send(200, f.read(), "application/json; charset=utf-8", cache="no-cache")
 
     def stats_static(self, path):
         name, ctype = STATS_STATIC[path]

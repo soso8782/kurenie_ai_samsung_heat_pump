@@ -3,7 +3,7 @@
 [![Verzia](https://img.shields.io/github/v/tag/soso8782/kurenie_ai_samsung_heat_pump?label=verzia&sort=semver)](https://github.com/soso8782/kurenie_ai_samsung_heat_pump/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Aktuálna verzia: 2.1.1** (15. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
+**Aktuálna verzia: 2.2.0** (15. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
 
 Domáci systém, ktorý zbiera dáta z tepelného čerpadla **Samsung EHS** (cez NASA zbernicu a ESPHome), počíta skutočnú spotrebu
 a COP, sleduje teploty v izbách a pomocou jazykového modelu (cez [OpenRouter](https://openrouter.ai)) **radí alebo priamo
@@ -60,6 +60,7 @@ Home Assistant (izby, kontakty, elektromer) <──WS/REST/MQTT──> agent.py 
 | `interventions.py`, `abtest.py` | zásahy (ventily…) s vyhodnotením, A/B test nastavení |
 | `notify.py`, `webpush.py` | upozornenia (HA webhook, Web Push s VAPID) |
 | `cftunnel.py`, `cfjwt.py` | Cloudflare Tunnel a overovanie Cloudflare Access JWT |
+| `locales/sk.json`, `locales/en.json` | texty webového rozhrania (slovenčina, angličtina); nový jazyk = nový súbor s rovnakými kľúčmi |
 | `profil.py`, `profil.example.json`, `modely/` | profil inštalácie (zariadenie, entity, izby, mantinely) a knižnica modelov |
 | `esphome/`, `docs/` | vzorová konfigurácia ESPHome a dokumentácia profilu |
 | `monitor/` | pôvodný jednoduchý monitor (port 8099) |
