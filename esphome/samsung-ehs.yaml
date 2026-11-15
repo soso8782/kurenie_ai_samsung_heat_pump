@@ -1,0 +1,299 @@
+# =====================================================================================================
+# Vzorová konfigurácia ESPHome pre aplikáciu Kúrenie AI (Samsung EHS cez NASA zbernicu)
+#
+# Komponent: https://github.com/Beormund/esphome-samsung-nasa  (samsung_nasa)
+# Názvy entít sú nastavené PRESNE podľa predvoleného profilu aplikácie (profil.default()["esp"]),
+# takže v sprievodcovi „Zariadenie a dom“ netreba nič mapovať ručne. Zmeníš‑li názov, zmeň ho aj v profile.
+#
+# Čo je overené z príkladu komponentu (example.yaml v repozitári Beormund/esphome-samsung-nasa):
+#   čísla NASA správ 0x4201, 0x4203, 0x4235–0x4238, 0x4065–0x4067, 0x4089, 0x42E9, 0x8204, 0x8235, 0x8413, FSV 2011/2012/2021/2022.
+# Čo NIE je overené (označené „TODO“): správy pre frekvenciu kompresora, odmrazovanie, PWM čerpadla, WL,
+#   posun krivky, FSV 2031/2032/4013 a iné. Čísla správ závisia od modelu/firmvéru – nájdeš ich v logu komponentu
+#   (debug_log_undefined_messages: true) alebo v dokumentácii komponentu. Nič sme nevymýšľali: bez správneho čísla
+#   entitu nechaj zakomentovanú – aplikácia sa bez nej správa podľa pravidla „chýbajúca entita = funkcia vypnutá“.
+#
+# Tajomstvá (secrets.yaml vedľa tohto súboru):
+#   wifi_ssid, wifi_password, ap_password, api_key, ota_password, web_user, web_password
+# =====================================================================================================
+
+substitutions:
+  device_name: m5stack-tc
+  friendly: "M5Stack TC"
+  # UART pre M5Stack Atom + Atomic RS485 Base: TX = GPIO19, RX = GPIO22 (pri inej doske zmeň tu)
+  uart_tx: GPIO19
+  uart_rx: GPIO22
+  # Adresy NASA zariadení: 20.00.00 = vnútorná (hydro) jednotka, 10.00.00 = vonkajšia jednotka
+  addr_indoor: "20.00.00"
+  addr_outdoor: "10.00.00"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly}
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf          # alternatíva: arduino
+
+logger:
+  level: INFO
+  logs:
+    samsung_nasa: ERROR    # pri hľadaní čísel správ dočasne daj DEBUG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${device_name}"
+    password: !secret ap_password
+
+captive_portal:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Aplikácia Kúrenie AI číta stav (REST + SSE) a zapisuje nastavenia (POST) práve cez web_server.
+web_server:
+  port: 80
+  auth:
+    username: !secret web_user
+    password: !secret web_password
+
+external_components:
+  - source: github://beormund/esphome-samsung-nasa@main
+    components: [samsung_nasa]
+
+uart:
+  id: nasa_uart
+  tx_pin: ${uart_tx}
+  rx_pin: ${uart_rx}
+  baud_rate: 9600
+  parity: EVEN
+
+samsung_nasa:
+  uart_id: nasa_uart
+  debug_log_messages: false
+  debug_log_undefined_messages: false
+  nasa_client: {}
+  devices:
+    - address: ${addr_indoor}
+      id: nasa_device_1
+    - address: ${addr_outdoor}
+      id: nasa_device_2
+
+# ----------------------------------------------------------------------------------------- senzory
+sensor:
+  # --- povinné pre aplikáciu: vonku, Tw2 (výstup), Tw1 (spiatočka) ---
+  - platform: samsung_nasa
+    message: 0x8204
+    nasa_device_id: nasa_device_2
+    name: "Vonkajšia teplota"
+    id: outdoor_temp
+
+  - platform: samsung_nasa
+    message: 0x4238
+    nasa_device_id: nasa_device_1
+    name: "Výstupná teplota vody (Tw2)"
+    id: flow_temp_out
+
+  - platform: samsung_nasa
+    message: 0x4236
+    nasa_device_id: nasa_device_1
+    name: "Spiatočka (Tw1)"
+    id: flow_temp_return
+
+  # Delta T = Tw2 − Tw1
+  - platform: template
+    name: "Delta T vykurovacej vody"
+    id: flow_temp_delta
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      if (id(flow_temp_out).has_state() && id(flow_temp_return).has_state())
+        return id(flow_temp_out).state - id(flow_temp_return).state;
+      return {};
+
+  # --- TÚV (voliteľné; bez bojlera vynechaj a v profile daj zariadenie.tuv = false) ---
+  - platform: samsung_nasa
+    message: 0x4237
+    nasa_device_id: nasa_device_1
+    name: "Teplota TÚV (Bojler)"
+    id: hot_water_current_temp
+
+  # --- prietok, príkon, chyba (voliteľné) ---
+  - platform: samsung_nasa
+    message: 0x42E9
+    nasa_device_id: nasa_device_1
+    name: "Prietok vody"
+    id: flow_rate
+
+  # Príkon podľa vnútorného merania jednotky (W za poslednú minútu). Nie každý model túto správu posiela –
+  # ak nechodí, entitu odstráň a nechaj príkon na kalibráciu z elektromera v aplikácii.
+  - platform: samsung_nasa
+    message: 0x8413
+    nasa_device_id: nasa_device_2
+    name: "Odhadovaný príkon TČ"
+    id: power_consumed_last_min
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+
+  - platform: samsung_nasa
+    message: 0x8235
+    nasa_device_id: nasa_device_2
+    name: "Chybový kód TČ"
+    id: error_code
+
+  # Denná spotreba TČ (kWh) – integrál príkonu od polnoci
+  - platform: total_daily_energy
+    name: "Denná spotreba TČ"
+    id: daily_energy_consumed
+    power_id: power_consumed_last_min
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+  # --- 3‑cestný ventil: 0 = kúrenie (izby), 1 = TÚV (bojler) ---
+  - platform: samsung_nasa
+    message: 0x4067
+    nasa_device_id: nasa_device_1
+    name: "3-cestný ventil (Smer ohrevu)"
+    id: three_way_valve
+
+  # --- izbová teplota, ktorú sleduje firmvér (podľa nej posúva krivku) ---
+  # TODO: over, že 0x4203 je pri tvojom zapojení „Zone 1 Indoor Temp“; je to zdroj teploty referenčnej izby.
+  - platform: samsung_nasa
+    message: 0x4203
+    nasa_device_id: nasa_device_1
+    name: "Sledovaná teplota (Detská izba)"
+    id: zone1_indoor_temp
+
+  # --- TODO (správy nie sú overené – dopĺňaj podľa svojho modelu, názvy ponechaj) ---
+  # - platform: samsung_nasa
+  #   message: 0x????            # frekvencia kompresora (Hz)
+  #   nasa_device_id: nasa_device_2
+  #   name: "Frekvencia kompresora"
+  # - platform: samsung_nasa
+  #   message: 0x????            # cieľová ekvitermická voda (WL)
+  #   nasa_device_id: nasa_device_1
+  #   name: "Cieľová ekvitermická voda (WL)"
+  # - platform: samsung_nasa
+  #   message: 0x????            # posun ekvitermickej krivky
+  #   nasa_device_id: nasa_device_1
+  #   name: "Posun ekvitermickej krivky"
+  # - platform: samsung_nasa
+  #   message: 0x????            # aktuálna cieľová teplota izby
+  #   nasa_device_id: nasa_device_1
+  #   name: "Aktuálna cieľová teplota izby"
+  # - platform: samsung_nasa
+  #   message: 0x????            # otáčky obehového čerpadla (PWM)
+  #   nasa_device_id: nasa_device_1
+  #   name: "Otáčky obehového čerpadla (PWM)"
+
+  # --- izby z iných zdrojov (Zigbee/BLE/HA), názov = pole „esp“ danej izby v profile ---
+  # Príklad: teplota z Home Assistant, ktorú ESP sprístupní aplikácii cez web_server:
+  # - platform: homeassistant
+  #   entity_id: sensor.jedalen_teplota
+  #   name: "Izba Jedáleň"
+  # - platform: homeassistant
+  #   entity_id: sensor.kuchyna_teplota
+  #   name: "Izba Kuchyňa"
+  #   (ďalej: „Izba Obývačka“, „Izba Spálňa“, „Izba Pracovňa“, „Izba Kúpeľňa“, „Izba Detská (Zigbee)“)
+
+binary_sensor:
+  - platform: samsung_nasa
+    message: 0x4089
+    nasa_device_id: nasa_device_1
+    name: "Obehové čerpadlo"
+    id: primary_water_pump
+
+  # TODO: odmrazovanie / požiadavka na teplo – čísla správ podľa modelu
+  # - platform: samsung_nasa
+  #   message: 0x????
+  #   nasa_device_id: nasa_device_2
+  #   name: "Odmrazovanie"
+  # - platform: samsung_nasa
+  #   message: 0x????
+  #   nasa_device_id: nasa_device_1
+  #   name: "Termostat (požiadavka na teplo)"
+
+# ----------------------------------------------------------------------------------------- nastavenia (zápis)
+# Zapisovať ich smie agent len v mantineloch profilu. Čísla FSV sú štandardné parametre Samsung EHS.
+number:
+  - platform: samsung_nasa
+    message: 0x4201
+    nasa_device_id: nasa_device_1
+    name: "Cieľová izbová teplota"
+    id: zone1_target_temp
+
+  - platform: samsung_nasa
+    message: 0x4235
+    nasa_device_id: nasa_device_1
+    name: "Cieľová teplota TÚV"
+    id: hot_water_target_temp
+
+  - platform: samsung_nasa
+    fsv: 2011
+    nasa_device_id: nasa_device_1
+    name: "FSV 2011 Vonku najchladnejšie"
+    id: fsv_2011
+
+  - platform: samsung_nasa
+    fsv: 2012
+    nasa_device_id: nasa_device_1
+    name: "FSV 2012 Vonku najteplejšie"
+    id: fsv_2012
+
+  - platform: samsung_nasa
+    fsv: 2021
+    nasa_device_id: nasa_device_1
+    name: "FSV 2021 WL1 voda pri najchladnejšom"
+    id: fsv_2021
+
+  - platform: samsung_nasa
+    fsv: 2022
+    nasa_device_id: nasa_device_1
+    name: "FSV 2022 WL1 voda pri najteplejšom"
+    id: fsv_2022
+
+  # Ekvitermická krivka 2 (WL2) – povinné pre agenta. Ak komponent číslo FSV pre tvoj model nepozná, zapíš ho cez správu.
+  - platform: samsung_nasa
+    fsv: 2031
+    nasa_device_id: nasa_device_1
+    name: "FSV 2031 WL2 voda pri najchladnejšom"
+    id: fsv_2031
+
+  - platform: samsung_nasa
+    fsv: 2032
+    nasa_device_id: nasa_device_1
+    name: "FSV 2032 WL2 voda pri najteplejšom"
+    id: fsv_2032
+
+  # Vypnutie kúrenia nad vonkajšou teplotou (voliteľné)
+  - platform: samsung_nasa
+    fsv: 4013
+    nasa_device_id: nasa_device_1
+    name: "FSV 4013 Vypnutie kúrenia nad vonk. teplotou"
+    id: fsv_4013
+
+  # TODO: „Maximálny kladný posun krivky“, „Maximálny posun krivky“, „Zosilnenie posunu krivky“ – pozri docs/PROFIL.md.
+  #       Tieto hodnoty nie sú štandardné FSV; v pôvodnej inštalácii ich rieši vlastný firmvér/šablóna ESP.
+
+# Hodnoty FSV sa čítajú len na požiadavku – obnov ich pri štarte a každých 30 minút.
+# UPOZORNENIE: presnú syntax akcie (samsung_nasa.request_read) a kľúča uart_id v hubu over s aktuálnym example.yaml
+# komponentu – tento súbor nebol skompilovaný ani nahraný do zariadenia.
+interval:
+  - interval: 30min
+    startup_delay: 30s
+    then:
+      - samsung_nasa.request_read:
+          components: [fsv_2011, fsv_2012, fsv_2021, fsv_2022, fsv_2031, fsv_2032, fsv_4013]

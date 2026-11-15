@@ -5,7 +5,7 @@ Jediný zápis do ESP: select „Režim izbovej regulácie“ = „Posun krivky�
 Stav je v agent.db, tabuľka state, kľúč `abtest` (JSON). tick() volá strážca každú minútu. Iba štandardná knižnica."""
 import datetime, json, math, time, traceback
 import contacts, interventions, notify
-from common import ROOMS, S, adb, day_bounds, get_state, hour_stats, is_dry, set_state, tcq
+from common import REF_NAME, REF_ROOM, ROOMS, S, adb, day_bounds, get_state, hour_stats, is_dry, set_state, tcq
 
 KEY = "abtest"
 ENT_SELECT = "Režim izbovej regulácie"
@@ -228,8 +228,8 @@ def read_conditions(cfg, now):
     """Podklady pre poistky: vek dát zberača, priemer detskej za 30 min, chybový kód, dohrev kúrenia (z ESP, None = neznámy)."""
     r = tcq(cfg, "SELECT v FROM meta WHERE k='last_sample'")
     age = now - int((r[0][0] if r else 0) or 0)
-    row = tcq(cfg, "SELECT avg(value), count(*) FROM samples WHERE entity=? AND ts>=? AND ts<=?", (S["detska"], now - SAFE_AVG_S, now))[0]
-    ch = tcq(cfg, "SELECT value FROM samples WHERE entity=? ORDER BY ts DESC LIMIT 1", (S["chyba"],))
+    row = tcq(cfg, "SELECT avg(value), count(*) FROM samples WHERE entity=? AND ts>=? AND ts<=?", (S[REF_ROOM], now - SAFE_AVG_S, now))[0]
+    ch = tcq(cfg, "SELECT value FROM samples WHERE entity=? ORDER BY ts DESC LIMIT 1", (S.get("chyba", ""),))
     backup = None
     try:
         backup = _agent().esp_get(cfg, "binary_sensor", ENT_BACKUP, timeout=4).get("value")
@@ -245,11 +245,11 @@ def safety(cfg, now):
         return False, "dáta zberača sú staršie ako 15 min"
     d = cd.get("detska")
     if d is None:
-        return False, "chýbajú dáta z detskej izby za posledných 30 min"
+        return False, "chýbajú dáta z referenčnej izby (%s) za posledných 30 min" % REF_NAME
     if d > SAFE_HI:
-        return False, "detská izba je príliš teplá (%s °C, hranica %s °C)" % (sk(d), sk(SAFE_HI))
+        return False, "referenčná izba (%s) je príliš teplá (%s °C, hranica %s °C)" % (REF_NAME, sk(d), sk(SAFE_HI))
     if d < SAFE_LO:
-        return False, "detská izba je príliš studená (%s °C, hranica %s °C)" % (sk(d), sk(SAFE_LO))
+        return False, "referenčná izba (%s) je príliš studená (%s °C, hranica %s °C)" % (REF_NAME, sk(d), sk(SAFE_LO))
     ch = cd.get("chyba")
     if ch not in (None, 0, 0.0):
         return False, "čerpadlo hlási chybový kód %d" % int(ch)
@@ -445,7 +445,7 @@ def _day_raw(cfg, e, c=None):
     for k in ROOMS:
         xs = [h[k] for h in ok if h.get(k) is not None]
         rooms[k] = sum(xs) / len(xs) if xs and len(xs) * 2 >= len(ok) else None
-    det = [h["detska"] for h in ok if h.get("detska") is not None]
+    det = [h[REF_ROOM] for h in ok if h.get(REF_ROOM) is not None]   # výsledok ostáva pod kľúčom "detska" (rozhranie pre web)
     okna = None
     try:
         okna = contacts.window_minutes(c, a + WINDOW_FROM_H * 3600, b) if c is not None else None
@@ -551,8 +551,8 @@ def verdict(res, noise):
         parts.append("Regulácia podľa izby spotrebovala v priemere o %s %% viac energie ako režim bez nej (neistota ± %s %%)."
                      % (sk(abs(us)), sk(ne)))
     if gA["mimo_pasma_h"] is not None and gB["mimo_pasma_h"] is not None:
-        parts.append("Detská bola mimo pásma 23 – 24 °C v dňoch A priemerne %s h denne, v dňoch B %s h (priemer %s °C a %s °C)."
-                     % (sk(gA["mimo_pasma_h"]), sk(gB["mimo_pasma_h"]), sk(gA["detska"]), sk(gB["detska"])))
+        parts.append("Referenčná izba (%s) bola mimo pásma 23 – 24 °C v dňoch A priemerne %s h denne, v dňoch B %s h (priemer %s °C a %s °C)."
+                     % (REF_NAME, sk(gA["mimo_pasma_h"]), sk(gB["mimo_pasma_h"]), sk(gA["detska"]), sk(gB["detska"])))
     if gA["tw2"] is not None and gB["tw2"] is not None:
         parts.append("Priemerná výstupná voda: %s °C v dňoch A a %s °C v dňoch B." % (sk(gA["tw2"]), sk(gB["tw2"])))
     warn = []
@@ -638,7 +638,7 @@ def llm_text(c, now=None):
         else:
             mode = "A – regulácia podľa izby je zapnutá ako obvykle"
         head = "Porovnávací test A/B beží: dnes je deň %d z %d, režim %s." % (idx, len(days), mode)
-    return ("POROVNÁVACÍ TEST:\n" + head + "\nMajiteľ ním meria, koľko energie regulácia podľa izby ušetrí. V dňoch B môže byť v izbách (aj v detskej) "
+    return ("POROVNÁVACÍ TEST:\n" + head + "\nMajiteľ ním meria, koľko energie regulácia podľa izby ušetrí. V dňoch B môže byť v izbách (aj v referenčnej izbe " + REF_NAME + ") "
             "zámerne teplejšie alebo chladnejšie, ber to ako súčasť testu a nie ako problém. Počas testu nemeň žiadne nastavenia "
-            "(systém ich aj tak odmietne), nenavrhuj zmeny krivky ani ventilov a dôvody typu „detská mimo cieľa“ či „izba pod "
+            "(systém ich aj tak odmietne), nenavrhuj zmeny krivky ani ventilov a dôvody typu „referenčná izba mimo cieľa“ či „izba pod "
             "minimom“ v dňoch B neriešiš. Poplachy (chybový kód, elektrický dohrev) platia ako vždy.")

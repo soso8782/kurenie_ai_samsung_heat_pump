@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Web agenta kúrenia: stav, vypínač agenta, denný kalendár po hodinách, zásahy, upozornenia, prihlásenie."""
-import datetime, hashlib, hmac, json, os, re, secrets, socket, sys, threading, time, urllib.request
+import datetime, hashlib, hmac, html as _html, json, os, re, secrets, shutil, socket, sqlite3, sys, threading, time, unicodedata, urllib.request
+import profil
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from common import (ROOM_NAMES, ROOMS, ROOT, S, TARGET_ROOMS, adb, balance, day_bounds, day_summary, get_state, get_targets,
+from common import (REF_ROOM, ROOM_NAMES, ROOMS, ROOT, S, TARGET_ROOMS, adb, balance, day_bounds, day_summary, get_state, get_targets,
                     hour_stats, is_dry, load_cfg, local_midnight, save_cfg, set_state, tcq, cfg_int)
 from agent import ALLOWED, ROOM_TARGET_ENT, UNDO_MAX_AGE_S, call_llm, chat_reply, parse_room_target, set_room_target, undo, update_days
 import agent as _agent_mod
@@ -139,13 +140,14 @@ def status(cfg, role="admin", email=None):
         ls = int(meta.get("last_sample") or 0)
         out["collector_age"] = now - ls
         out["first_day"] = time.strftime("%Y-%m-%d", time.localtime(int(meta.get("start") or now)))
-        names = list(S.values()) + list(ALLOWED) + ["Cieľová izbová teplota", "Maximálny posun krivky", "Cieľová teplota TÚV"]
+        names = list(S.values()) + list(ALLOWED) + ["Cieľová izbová teplota", "Maximálny posun krivky", TUV_CIEL_ENT]
         rows = tcq(cfg, "SELECT entity, value FROM samples WHERE ts=? AND entity IN (%s)" % ",".join("?" * len(names)),
                    (ls, *names))
         out["current"] = {e: v for e, v in rows}
     except Exception as e:
         out["collector_error"] = str(e)
     out["stats"] = stats_brief(cfg)
+    out["profil_info"] = profil_info(cfg)
     try:   # živé hodnoty (COP teraz, výkon, spotreba); bez modulu štatistík alebo pri chybe None
         out["live"] = stats.live(cfg) if stats is not None and hasattr(stats, "live") else None
     except Exception:
@@ -157,7 +159,8 @@ def status(cfg, role="admin", email=None):
     return out
 
 
-ROOM_KEYS = ("vonku", "detska", "detska_z", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna")
+# kľúče izieb pre rolu user: vonku, izby z profilu a „_z“ (zigbee) variant referenčnej izby; len tie, ktoré majú entitu v ESP (S)
+ROOM_KEYS = tuple(k for k in ("vonku",) + tuple(ROOMS) + (REF_ROOM + "_z",) if k in S)
 
 
 def status_user(cfg, role, email):
@@ -180,10 +183,11 @@ def status_user(cfg, role, email):
             out["tuv"] = {"active": False, "until": None, "target": None, "base": None, "last": None}
     finally:
         c.close()
+    out["profil_info"] = profil_info(cfg)
     out["current"] = {}
     try:
         ls = int(dict(tcq(cfg, "SELECT k, v FROM meta")).get("last_sample") or 0)
-        names = [S[k] for k in ROOM_KEYS] + [S["ciel"], ROOM_TARGET_ENT, S["bojler"], "Cieľová teplota TÚV"]
+        names = [S[k] for k in ROOM_KEYS] + [x for x in (S.get("ciel"), ROOM_TARGET_ENT, S.get("bojler"), TUV_CIEL_ENT) if x]
         rows = tcq(cfg, "SELECT entity, value FROM samples WHERE ts=? AND entity IN (%s)" % ",".join("?" * len(names)), (ls, *names))
         out["current"] = {e: v for e, v in rows}
     except Exception as e:
@@ -458,8 +462,10 @@ def user_target_post(cfg, body, email):
     return 200, {"ok": bool(ok), "text": str(text), "target": target}
 
 
-SERIES_KEYS = ("detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna", "bojler")
-SERIES_TARGET = {"detska": S["ciel"], "bojler": "Cieľová teplota TÚV"}
+TUV_CIEL_ENT = profil.device_entity("tuv_ciel") or "Cieľová teplota TÚV"
+SERIES_KEYS = tuple(k for k in ROOMS if k in S) + (("bojler",) if "bojler" in S else ())
+SERIES_TARGET = {REF_ROOM: S.get("ciel"), "bojler": TUV_CIEL_ENT}
+SERIES_TARGET = {k: v for k, v in SERIES_TARGET.items() if v}
 
 
 def _series_rows(cfg, entity, since, bin_s):
@@ -1222,6 +1228,253 @@ def stats_brief(cfg):
         return {"hours": None, "last_day": None, "error": str(e)[:200]}
 
 
+# --- profil inštalácie (v2): informácie pre UI, sprievodca nastavením zariadenia a domu
+_spotreba_cache = {"t": 0.0, "v": False}
+
+
+def _spotreba_domu(cfg):
+    """Existujú dáta o spotrebe celého domu (stats.db kwh_dom alebo ims_hourly.json)? Výsledok sa 60 s pamätá."""
+    now = time.time()
+    if now - _spotreba_cache["t"] < 60:
+        return _spotreba_cache["v"]
+    ok = False
+    try:
+        path = ((cfg.get("STATS_DB") or "").strip() or os.path.join(ROOT, "stats.db"))
+        if os.path.isfile(path):
+            con = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True, timeout=5)
+            try:
+                ok = con.execute("SELECT 1 FROM hourly WHERE kwh_dom IS NOT NULL LIMIT 1").fetchone() is not None
+            finally:
+                con.close()
+    except Exception:
+        ok = False
+    if not ok:
+        try:
+            import ha_cost
+            ok = bool(ha_cost.load_ims(ha_cost.IMS_FILE))
+        except Exception:
+            ok = False
+    _spotreba_cache.update(t=now, v=bool(ok))
+    return bool(ok)
+
+
+def profil_info(cfg):
+    """Blok `profil_info` v /api/status (aj pre rolu user, bez citlivých údajov): zariadenie, izby a dostupné funkcie."""
+    p = profil.load()
+    ref = profil.reference_room(p)
+    s_map = profil.esp_s(p)
+    tuv_ent = profil.device_entity("tuv", p)
+    tuv_on = bool(p["zariadenie"].get("tuv") and tuv_ent)
+    try:
+        mdl = profil.model(p) is not None
+    except Exception:
+        mdl = False
+    izby = [{"kluc": r["kluc"], "nazov": r["nazov"], "referencna": r["kluc"] == ref, "esp": s_map.get(r["kluc"]) or r["esp"] or ""}
+            for r in p["izby"]]
+    izby.sort(key=lambda r: not r["referencna"])
+    lo, hi = profil.room_target_range(p)
+    out = {"zariadenie": p["zariadenie"].get("nazov") or "", "kurenie": p["zariadenie"].get("kurenie"), "izby": izby,
+           "ciel_rozsah": [lo, hi],
+           "funkcie": {"ha": bool((cfg.get("HA_TOKEN") or "").strip()), "agent_ai": bool((cfg.get("OPENROUTER_API_KEY") or "").strip()),
+                       "tuv": tuv_on, "spotreba_domu": _spotreba_domu(cfg), "model_cop": mdl}}
+    if tuv_on:
+        out["tuv_entity"] = {"teplota": tuv_ent, "ciel": profil.device_entity("tuv_ciel", p) or TUV_CIEL_ENT}
+    return out
+
+
+def profil_get():
+    """GET /api/profil (admin)."""
+    return {"profil": profil.load(), "chyby": profil.errors(), "ulozeny": os.path.exists(profil.PROFILE_FILE), "modely": profil.list_models(),
+            "typy_kurenia": list(profil.TYPY_KURENIA), "typy_jednotky": list(profil.TYPY_JEDNOTKY),
+            "abs_limity": dict({k: list(v) for k, v in profil.ABS_LIMITS.items()}, ciel_izby=list(profil.ABS_ROOM_TARGET)),
+            "predvolby": {t: {k: list(v) for k, v in d.items()} for t, d in profil.PRESETS.items()},
+            "kluce_zariadenia": list(profil.DEVICE_KEYS), "kluce_nastaveni": list(profil.SETTING_KEYS)}
+
+
+def profil_post(body):
+    """POST /api/profil {profil}: overí a uloží. Chyby -> 400 {chyby:[…]}."""
+    p = body.get("profil")
+    if not isinstance(p, dict):
+        return 400, {"error": "Chýba profil.", "chyby": ["Telo požiadavky musí obsahovať objekt „profil“."]}
+    try:
+        errs = profil.save(p)
+    except OSError as e:
+        return 500, {"error": "Profil sa nepodarilo zapísať: %s" % e, "chyby": []}
+    if errs:
+        return 400, {"error": "Profil obsahuje chyby (%d)." % len(errs), "chyby": errs}
+    return 200, {"ok": True, "restart_potrebny": True}
+
+
+def profil_default():
+    """POST /api/profil/predvoleny: zmaže profil.json (návrat na pôvodnú inštaláciu)."""
+    try:
+        if os.path.exists(profil.PROFILE_FILE):
+            os.remove(profil.PROFILE_FILE)
+        profil._cache.pop(profil.PROFILE_FILE, None)
+    except OSError as e:
+        return 500, {"error": "Profil sa nepodarilo zmazať: %s" % e}
+    return 200, {"ok": True, "restart_potrebny": True}
+
+
+def _plain(s):
+    """Malé písmená bez diakritiky (na porovnávanie názvov entít)."""
+    return "".join(ch for ch in unicodedata.normalize("NFKD", str(s or "")) if not unicodedata.combining(ch)).lower()
+
+
+def slug_key(name):
+    """Kľúč izby z názvu: malé písmená bez diakritiky, a-z0-9_, max 21 znakov."""
+    k = re.sub(r"[^a-z0-9]+", "_", _plain(name)).strip("_")[:21].strip("_")
+    return k if k and k[0].isalpha() else ("i_" + k)[:21] if k else ""
+
+
+def _http_get_text(url, timeout=4):
+    req = urllib.request.Request(url, headers={"User-Agent": "kurenie-web"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read(2_000_000).decode("utf-8", "replace")
+
+
+ESP_ROW_RE = re.compile(r'<tr[^>]*\bid="[^"]*"[^>]*>\s*<td[^>]*>(.*?)</td>\s*<td[^>]*>(.*?)</td>', re.S | re.I)
+
+
+def esp_entities(cfg):
+    """Entity z ESP: [{nazov, hodnota, zdroj}] – z web_server stránky ESP (ak odpovie) a z posledných vzoriek v tc.db (10 min)."""
+    out, seen = [], set()
+    url = (os.environ.get("TC_ESP") or cfg.get("TC_ESP") or cfg.get("ESP_URL") or "").strip().rstrip("/")
+    if url:
+        try:
+            page = _http_get_text(url + "/")
+            for nm, val in ESP_ROW_RE.findall(page):
+                nm = _html.unescape(re.sub(r"<[^>]+>", "", nm)).strip()
+                val = _html.unescape(re.sub(r"<[^>]+>", "", val)).strip()
+                if nm and nm not in seen:
+                    seen.add(nm)
+                    out.append({"nazov": nm, "hodnota": val, "zdroj": "esp"})
+        except Exception:
+            pass
+    try:
+        rows = tcq(cfg, "SELECT entity, value, max(ts) FROM samples WHERE ts>=? GROUP BY entity", (int(time.time()) - 600,))
+        for ent, val, _ts in rows:
+            if ent and ent not in seen:
+                seen.add(ent)
+                out.append({"nazov": ent, "hodnota": None if val is None else round(float(val), 2), "zdroj": "tc.db"})
+    except Exception:
+        pass
+    return out
+
+
+# (kľúč, výraz nad názvom bez diakritiky); prvá zhoda s ešte nepridelenou entitou vyhráva, nastavenia FSV sa hľadajú samostatne
+_NAV_DEVICE = (
+    ("tuv_ciel", lambda n: "tuv" in n and "cielov" in n),
+    ("tuv", lambda n: "tuv" in n or "bojler" in n),
+    ("ciel_izby", lambda n: "cielova izbova" in n or ("cielova teplota izby" in n and "aktualna" not in n)),
+    ("ciel_akt", lambda n: "aktualna cielova" in n),
+    ("sledovana", lambda n: "sledovana" in n),
+    ("posun", lambda n: "posun" in n and "ekviterm" in n),
+    ("wl", lambda n: ("ekviterm" in n and "voda" in n) or "(wl)" in n),
+    ("tw2", lambda n: "tw2" in n or "vystup" in n),
+    ("tw1", lambda n: "tw1" in n or "spiatoc" in n),
+    ("dt", lambda n: "delta t" in n or n.startswith("dt ")),
+    ("freq", lambda n: "frekvenc" in n),
+    ("prikon", lambda n: "prikon" in n),
+    ("pwm", lambda n: "pwm" in n or "otacky" in n or "obehov" in n),
+    ("chyba", lambda n: "chyb" in n),
+    ("kwh_den", lambda n: "denna spotreba" in n or ("denn" in n and "spotreb" in n)),
+    ("flow", lambda n: "prietok" in n),
+    ("ventil", lambda n: "ventil" in n and ("cest" in n or "smer" in n)),
+    ("odmrazovanie", lambda n: "odmraz" in n),
+    ("termostat", lambda n: "termostat" in n),
+    ("vonku", lambda n: "vonkajsia" in n or "vonku" in n),
+)
+
+
+def esp_navrh(names):
+    """Automatické priradenie kanonických kľúčov (profil.DEVICE_KEYS, SETTING_KEYS) k názvom entít podľa zhody názvu."""
+    entity, nast, used = {}, {}, set()
+    plain = [(n, _plain(n)) for n in names]
+    for n, pn in plain:   # nastavenia: „FSV 2031 …“ -> fsv2031
+        m = re.match(r"\s*fsv\s*(\d{4})", pn)
+        if m and ("fsv" + m.group(1)) in profil.SETTING_KEYS and ("fsv" + m.group(1)) not in nast:
+            nast["fsv" + m.group(1)] = n
+            used.add(n)
+    for key, test in (("max_posun_zaporny", lambda p: "maximalny posun" in p),
+                      ("max_posun", lambda p: "maximalny kladny posun" in p),
+                      ("zosilnenie", lambda p: "zosilnenie" in p)):
+        for n, pn in plain:
+            if n not in used and test(pn) and not pn.startswith("fsv"):
+                nast[key] = n
+                used.add(n)
+                break
+    for key, test in _NAV_DEVICE:
+        for n, pn in plain:
+            if n not in used and not pn.startswith("fsv") and test(pn):
+                entity[key] = n
+                used.add(n)
+                break
+    izby, ks = [], set()
+    for n, pn in plain:
+        if n not in used and pn.startswith("izba ") and not pn.startswith("izba cielov"):
+            nm = re.sub(r"\s*\(.*?\)\s*$", "", n[5:]).strip() or n
+            k = slug_key(nm)
+            if k and k not in ks:
+                ks.add(k)
+                izby.append({"kluc": k, "nazov": nm, "esp": n})
+    return {"entity": entity, "nastavenia": nast, "izby": izby}
+
+
+def profil_esp_entity(cfg):
+    items = esp_entities(cfg)
+    return {"entity": items, "navrh": esp_navrh([i["nazov"] for i in items]),
+            "povinne": ["vonku", "tw2", "tw1", "freq", "wl", "posun", "fsv2031", "fsv2032"]}
+
+
+HA_TEMP_TEMPLATE = ("{% set ns = namespace(o=[]) %}{% for s in states.sensor if s.attributes.device_class == 'temperature' %}"
+                    "{% set ns.o = ns.o + [{'entity_id': s.entity_id, 'meno': s.name, 'stav': s.state}] %}{% endfor %}{{ ns.o | tojson }}")
+
+
+def _ha_temp_sensors(cfg):
+    url, token = contacts.ha_conf(cfg)
+    req = urllib.request.Request(url + "/api/template", data=json.dumps({"template": HA_TEMP_TEMPLATE}).encode("utf-8"), method="POST",
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.loads(r.read(4_000_000).decode("utf-8", "replace").strip())
+    return data if isinstance(data, list) else []
+
+
+def profil_ha_entity(cfg):
+    """Teplotné senzory z HA pre výber izieb; bez HA_TOKEN prázdny zoznam s dôvodom."""
+    url, token = contacts.ha_conf(cfg)
+    if not token or not url:
+        return {"ok": False, "entity": [], "dovod": "Home Assistant nie je nastavený (chýba adresa alebo token)."}
+    try:
+        rows = _ha_temp_sensors(cfg)
+    except Exception as e:
+        return {"ok": False, "entity": [], "dovod": "Home Assistant neodpovedá: %s" % type(e).__name__}
+    out = [{"entity_id": r["entity_id"], "meno": str(r.get("meno") or r["entity_id"]), "stav": r.get("stav")}
+           for r in rows if isinstance(r, dict) and isinstance(r.get("entity_id"), str) and r["entity_id"].startswith("sensor.")]
+    out.sort(key=lambda r: r["meno"].lower())
+    return {"ok": True, "entity": out}
+
+
+RESTART_DELAY = 1.0
+RESTART_UNITS = ("kurenie-agent", "kurenie-collector")
+
+
+def _restart_worker():
+    _systemctl("restart", *RESTART_UNITS)
+    time.sleep(RESTART_DELAY)
+    _systemctl("restart", "kurenie-web")
+
+
+def restart_services(cfg):
+    """POST /api/restart: asynchrónny reštart agenta a zberača, potom webu (sám seba). V DRY_RUN alebo bez systemctl len vráti dôvod."""
+    if is_dry(cfg):
+        return {"ok": False, "dovod": "Testovacie prostredie (DRY_RUN): služby sa nereštartujú."}
+    if not shutil.which("systemctl"):
+        return {"ok": False, "dovod": "systemctl nie je dostupný (aplikácia nebeží ako systemd služba). Reštartuj služby ručne."}
+    threading.Thread(target=_restart_worker, name="restart-sluzieb", daemon=True).start()
+    return {"ok": True}
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -1336,6 +1589,12 @@ class H(BaseHTTPRequestHandler):
                 return self.send(403, NO_PERM)
             if u.path == "/api/status":
                 return self.send(200, status(cfg, role, email))
+            if u.path == "/api/profil":
+                return self.send(200, profil_get())
+            if u.path == "/api/profil/esp_entity":
+                return self.send(200, profil_esp_entity(cfg))
+            if u.path == "/api/profil/ha_entity":
+                return self.send(200, profil_ha_entity(cfg))
             if u.path == "/api/push/key":
                 try:
                     return self.send(200, {"key": notify.vapid_keys()[1]})
@@ -1500,6 +1759,14 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/settings":
                 code, out = save_settings(cfg, body)
                 return self.send(code, out)
+            if u.path == "/api/profil":
+                code, out = profil_post(body)
+                return self.send(code, out)
+            if u.path == "/api/profil/predvoleny":
+                code, out = profil_default()
+                return self.send(code, out)
+            if u.path == "/api/restart":
+                return self.send(200, restart_services(cfg))
             if u.path == "/api/message":
                 text = str(body.get("text") or "").strip()
                 if not text or len(text) > 2000:

@@ -7,11 +7,14 @@ Zápis ide VÝLUČNE cez agent.esp_set_number() (ten rešpektuje DRY_RUN). Volá
 """
 import json, time, urllib.request
 import abtest, notify
-from common import S, get_state, is_dry, set_state, tcq
+import profil
+from common import P, S, get_state, is_dry, set_state, tcq
 
-ENT_TARGET = "Cieľová teplota TÚV"
+# TÚV logika je aktívna len ak profil hovorí, že zariadenie má TÚV a má entitu cieľa TÚV; inak ENT_TARGET = "" (tick nerobí nič)
+TUV_ON = bool(P["zariadenie"].get("tuv")) and bool(profil.device_entity("tuv_ciel", P))
+ENT_TARGET = profil.device_entity("tuv_ciel", P) if TUV_ON else ""
 ENT_BOOSTER = "Elektrický dohrev TÚV (Booster heater)"
-ENT_ERROR = "Chybový kód TČ"
+ENT_ERROR = S.get("chyba", "")
 T_MIN, T_MAX, T_STEP = 40.0, 52.0, 2.0
 DEFAULT_WINDOW = ("12:00", "14:00")
 STALE_S = 600
@@ -126,6 +129,8 @@ def _log_action(c, old, new, reason, applied, result):
 
 def _write_target(cfg, value):
     """Jediný zápis tohto modulu: cieľ TÚV v rozsahu 40-52 °C cez agent.esp_set_number (DRY_RUN sa rešpektuje tam)."""
+    if not ENT_TARGET:
+        raise ValueError("zariadenie nemá TÚV (entita cieľa TÚV nie je v profile)")
     if not (T_MIN <= value <= T_MAX):
         raise ValueError("hodnota TÚV %s mimo povoleného rozsahu %s-%s" % (value, T_MIN, T_MAX))
     ag = _agent()
@@ -140,6 +145,8 @@ def _write_target(cfg, value):
 def can_start(cfg, c):
     """(ok, dôvod): agent nie je off, chybový kód 0, dáta čerstvé, booster vypnutý."""
     ag = _agent()
+    if not ENT_TARGET:
+        return False, "zariadenie nemá TÚV"
     if abtest.active(c):
         return False, "prebieha porovnávací test"
     if get_state(c, "mode", "advise") == "off":
@@ -148,9 +155,10 @@ def can_start(cfg, c):
     age = int(time.time()) - int((r[0][0] if r else 0) or 0)
     if age > STALE_S:
         return False, "dáta zberača sú staré (%d s)" % age
-    code = _num(ag.esp_get(cfg, "sensor", ENT_ERROR).get("value"))
-    if code is None or code != 0:
-        return False, "chybový kód TČ = %s" % code
+    if ENT_ERROR:   # bez entity chybového kódu sa táto poistka preskočí
+        code = _num(ag.esp_get(cfg, "sensor", ENT_ERROR).get("value"))
+        if code is None or code != 0:
+            return False, "chybový kód TČ = %s" % code
     if ag.esp_get(cfg, "binary_sensor", ENT_BOOSTER).get("value") is not False:
         return False, "elektrický dohrev TÚV je zapnutý"
     return True, ""
@@ -314,6 +322,8 @@ def set_target_manual(cfg, c, value, who):
 
 def _bojler_now(cfg, now):
     """Posledná teplota bojlera zo samples (vek <= STALE_S) alebo None."""
+    if not S.get("bojler"):
+        return None
     try:
         r = tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND value IS NOT NULL ORDER BY ts DESC LIMIT 1", (S["bojler"],))
     except Exception:
@@ -352,6 +362,8 @@ def _tick_manual(cfg, c, now):
 def tick(cfg, c, now=None):
     """Jeden krok plánovača (z watchdogu každú minútu). Vracia krátky popis, čo spravil (pre log/testy)."""
     now = now or time.time()
+    if not ENT_TARGET:
+        return "nečinný (zariadenie nemá TÚV)"
     w = ensure_window(cfg, c, now)
     boosted = get_state(c, "dhw_boosted", "0") == "1"
     on = enabled(c)

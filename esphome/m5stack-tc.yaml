@@ -1,0 +1,1450 @@
+# Overená konfigurácia ESPHome mosta (M5Stack Atom + RS485 na NASA zbernici) z referenčnej inštalácie
+# Samsung EHS Split AE120JXEDGH + hydrobox AE160JNYDGH (gen. J, 2018). Názvy entít zodpovedajú predvolenému profilu.
+# Heslá a kľúče sú v secrets.yaml (!secret), entity Home Assistant (izbové senzory) si prepíšte na svoje.
+
+esphome:
+  name: m5stack-tc
+  friendly_name: m5stack-tc
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf
+
+web_server:
+  port: 80
+  version: 3
+  sorting_groups:
+    - id: g_izba
+      name: "Izbová regulácia"
+      sorting_weight: 10
+    - id: g_plan
+      name: "Časový plán izby"
+      sorting_weight: 20
+    - id: g_nastav
+      name: "Nastavenia regulácie"
+      sorting_weight: 30
+    - id: g_krivka
+      name: "Ekvitermická krivka v TČ (FSV)"
+      sorting_weight: 35
+    - id: g_tc
+      name: "Ovládanie TČ"
+      sorting_weight: 40
+    - id: g_teploty
+      name: "Teploty vody a vonku"
+      sorting_weight: 50
+    - id: g_tarifa
+      name: "Drahá tarifa"
+      sorting_weight: 60
+    - id: g_spotreba
+      name: "Príkon a spotreba"
+      sorting_weight: 70
+    - id: g_izby
+      name: "Teploty izieb (z HA)"
+      sorting_weight: 75
+    - id: g_diag
+      name: "Diagnostika"
+      sorting_weight: 80
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret m5stack_tc_api_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: 192.168.1.199   # IP adresa ESP vo vašej sieti (ESP_URL v config.env)
+  # Záchranný hotspot: ak sa ESP 1 minútu nevie pripojiť na Wi-Fi, spustí vlastnú sieť.
+  # Pripojte sa naň mobilom a na http://192.168.4.1 zadajte novú Wi-Fi (captive portal).
+  ap:
+    ssid: "m5stack-tc zachrana"
+    password: !secret m5stack_tc_ap_password
+
+captive_portal:
+
+
+#########################################################################
+# PREMENNÉ NA ZAPAMÄTANIE STAVU PRED VYPNUTÍM
+#########################################################################
+globals:
+  - id: kurenie_bolo_zapnute
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+ 
+  - id: tuv_bolo_zapnute
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+ 
+  # restore_value: true -> po reštarte počas drahej tarify sa kúrenie správne obnoví
+  - id: bolo_vypnute_blokovanim
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+ 
+  # true = kúrenie vypla izbová regulácia (režim Vypínanie kúrenia) a ona ho aj zapne
+  - id: regulacia_vypla_kurenie
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+
+  # sledovanie poslednej zmeny vypínača kúrenia (pre minimálny chod/pauzu)
+  - id: kurenie_posledny_stav
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: kurenie_posledna_zmena
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # aktuálne platná cieľová teplota izby (z plánu alebo pevná)
+  - id: izba_aktualny_ciel
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  # pomalé doťahovanie posunu krivky (integračná časť), NAN = nadviazať na aktuálny posun
+  - id: posun_i
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+
+  - id: posun_i_cas
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # čas posledného zápisu posunu krivky (obmedzenie na 1 zmenu za 10 min)
+  - id: posun_posledny_zapis
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # čas poslednej aktualizácie izbovej teploty (ms od štartu); 0 = ešte neprišla
+  - id: detska_posledna_aktualizacia
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+ 
+#########################################################################
+# ČASOVÁ LOGIKA (TARIFY + BEZPEČNÁ KONTROLA TEPLOTY V IZBE)
+#########################################################################
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    timezone: "Europe/Bratislava"
+
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/Bratislava"
+
+# Hlavná logika beží každú minútu cez interval - NEZÁVISLE od platného času.
+# Bez času (HA aj SNTP nedostupné) sa vynechá iba tarifa a časový plán,
+# poistky izbovej regulácie (posun 0 / zapnúť kúrenie) bežia ďalej.
+interval:
+  - interval: 1min
+    then:
+          - lambda: |-
+              // --- ŠTART: počkať, kým NASA pošle skutočné stavy (inak sw_kurenie = false) ---
+              if (millis() < 120000UL || !id(tw2_temp).has_state()) return;
+
+              auto time = id(homeassistant_time).now();
+              if (!time.is_valid()) time = id(sntp_time).now();
+              bool cas_ok = time.is_valid();
+              int h = time.hour;
+
+              // --- 0. SLEDOVANIE ZMIEN VYPÍNAČA KÚRENIA (ručne, tarifou aj reguláciou) ---
+              bool kurenie_on = id(sw_kurenie).state;
+              static bool init_stav = false;
+              if (!init_stav) {
+                // prvý beh po štarte: prevziať stav bez započítania ako "zmena"
+                init_stav = true;
+                id(kurenie_posledny_stav) = kurenie_on;
+              }
+              if (kurenie_on != id(kurenie_posledny_stav)) {
+                id(kurenie_posledny_stav) = kurenie_on;
+                id(kurenie_posledna_zmena) = millis();
+                // Kúrenie zapnuté ručne počas pauzy regulácie -> regulácia to rešpektuje
+                if (kurenie_on && id(regulacia_vypla_kurenie)) {
+                  ESP_LOGI("izba", "Kúrenie zapnuté mimo regulácie - preberám nový stav");
+                  id(regulacia_vypla_kurenie) = false;
+                }
+              }
+
+              // --- 1. LOGIKA DRAHEJ TARIFY (podľa okna, nie len presnej minúty) ---
+              int r_start = (int) id(tarifa_ranny_zaciatok).state;
+              int r_end   = (int) id(tarifa_ranny_koniec).state;
+              int v_start = (int) id(tarifa_vecerny_zaciatok).state;
+              int v_end   = (int) id(tarifa_vecerny_koniec).state;
+ 
+              // okno môže ísť aj cez polnoc (napr. 22 -> 2)
+              auto v_intervale = [](int hh, int s, int e) {
+                return s <= e ? (hh >= s && hh < e) : (hh >= s || hh < e);
+              };
+              // Bez platného času sa okno neuplatní; ak bolo kúrenie vypnuté tarifou
+              // (napr. reštart počas tarify), po 10 min bez času sa radšej obnoví.
+              bool v_okne = cas_ok && id(tariff_block_enable).state &&
+                            (v_intervale(h, r_start, r_end) || v_intervale(h, v_start, v_end));
+              if (!cas_ok && id(bolo_vypnute_blokovanim) && millis() < 10UL * 60UL * 1000UL) {
+                v_okne = true;   // krátko po štarte ešte čakať na čas, stav sa drží
+              }
+
+              if (v_okne && !id(bolo_vypnute_blokovanim)) {
+                ESP_LOGI("tarifa", "Začiatok drahej tarify - vypínam kúrenie a TÚV");
+                id(kurenie_bolo_zapnute) = id(sw_kurenie).state;
+                id(tuv_bolo_zapnute) = id(sw_tuv).state;
+                id(bolo_vypnute_blokovanim) = true;
+                if (id(sw_kurenie).state) { id(sw_kurenie).turn_off(); }
+                if (id(sw_tuv).state) { id(sw_tuv).turn_off(); }
+              } else if (!v_okne && id(bolo_vypnute_blokovanim)) {
+                if (cas_ok) ESP_LOGI("tarifa", "Koniec drahej tarify - obnovujem stav");
+                else ESP_LOGW("tarifa", "Nie je platný čas - ukončujem blokovanie tarify (poistka)");
+                id(bolo_vypnute_blokovanim) = false;
+                if (id(kurenie_bolo_zapnute)) { id(sw_kurenie).turn_on(); }
+                if (id(tuv_bolo_zapnute)) { id(sw_tuv).turn_on(); }
+              }
+              // Ručné zapnutie počas okna sa už neprepíše - vypína sa iba raz pri vstupe do okna.
+              // Ak kúrenie pred tarifou vypla regulácia, kurenie_bolo_zapnute = false,
+              // takže ho tarifa na konci nezapne a riadenie prevezme znova regulácia.
+
+              // --- 2. IZBOVÁ REGULÁCIA (Detská izba) ---
+              // Režimy: 0 = Vypnutá (izba sa ignoruje), 1 = Posun krivky, 2 = Vypínanie kúrenia
+              auto rezim_opt = id(izba_rezim).active_index();
+              size_t rezim = rezim_opt.has_value() ? *rezim_opt : 0;
+
+              // --- Cieľová teplota: časový plán alebo pevná hodnota ---
+              // Aktívne pásmo = to s najneskorším začiatkom <= teraz; pred prvým
+              // pásmom dňa platí posledné pásmo z predošlého dňa (typicky Noc).
+              float ciel, zapnutie;
+              const char *pasmo;
+              if (id(plan_aktivny).state && cas_ok) {
+                datetime::TimeEntity *zac[4] = {id(plan_noc_zac), id(plan_rano_zac),
+                                                id(plan_den_zac), id(plan_vecer_zac)};
+                number::Number *tep[4] = {id(plan_noc_tep), id(plan_rano_tep),
+                                          id(plan_den_tep), id(plan_vecer_tep)};
+                static const char *const MENA[4] = {"Noc", "Ráno", "Deň", "Večer"};
+                int teraz = time.hour * 60 + time.minute;
+                int akt = -1, akt_m = -1, posl = 0, posl_m = -1;
+                for (int k = 0; k < 4; k++) {
+                  int m = zac[k]->hour * 60 + zac[k]->minute;
+                  if (m <= teraz && m > akt_m) { akt = k; akt_m = m; }
+                  if (m > posl_m) { posl = k; posl_m = m; }
+                }
+                if (akt < 0) akt = posl;
+                ciel = tep[akt]->state;
+                zapnutie = ciel - id(plan_hysterezia).state;
+                pasmo = MENA[akt];
+              } else {
+                ciel = id(user_cielova_teplota).state;
+                zapnutie = id(user_teplota_zapnutia).state;
+                pasmo = id(plan_aktivny).state ? "Pevná (bez času)" : "Pevná";
+              }
+              if (id(izba_aktualny_ciel) != ciel) {
+                id(izba_aktualny_ciel) = ciel;
+                ESP_LOGI("izba", "Pásmo %s - cieľová teplota izby %.1f °C (zapnutie %.1f °C)", pasmo, ciel, zapnutie);
+                id(izba_ciel_sensor).update();
+              }
+              char prefix[40];
+              snprintf(prefix, sizeof(prefix), "[%s %.1f °C] ", pasmo, ciel);
+
+              // Stav regulácie pre HA - publikuje sa len pri zmene textu
+              auto stav = [&](const std::string &s) {
+                std::string t = std::string(prefix) + s;
+                if (id(izba_stav).get_state() != t) id(izba_stav).publish_state(t);
+              };
+              char buf[160];
+
+              if (rezim == 0) { stav("Vypnutá - izba sa ignoruje"); return; }
+
+              // HA posiela hodnotu len pri ZMENE - stála teplota neznamená výpadok.
+              // Výpadok = HA odpojený, entita unavailable/unknown (NaN), alebo
+              // 12 h bez jedinej zmeny (posledná záchrana, ak HA drží starú hodnotu).
+              const uint32_t MAX_VEK_MS = 12UL * 60UL * 60UL * 1000UL;   // 12 hodín
+              float detska = id(detska_teplota).state;
+              bool cerstva = !isnan(detska) && api::global_api_server->is_connected() &&
+                             id(detska_posledna_aktualizacia) != 0 &&
+                             (millis() - id(detska_posledna_aktualizacia)) < MAX_VEK_MS;
+
+              // Poistka reaguje až na výpadok dlhší ako 5 min (aj po štarte ESP),
+              // krátke výpadky senzora/HA nemenia nič - posun sa len drží.
+              const uint32_t VYPADOK_MS = 5UL * 60UL * 1000UL;
+              static uint32_t nedostupna_od = 0;
+              if (cerstva) {
+                nedostupna_od = 0;
+              } else if (nedostupna_od == 0) {
+                nedostupna_od = millis();
+              }
+              if (!cerstva && (millis() - nedostupna_od) < VYPADOK_MS) {
+                snprintf(buf, sizeof(buf), "Čakám na teplotu z izby (%u s) - stav sa drží",
+                         (unsigned) ((millis() - nedostupna_od) / 1000));
+                stav(buf);
+                return;
+              }
+              // odtiaľto !cerstva znamená skutočný výpadok dlhší ako 5 min
+
+              if (cerstva && zapnutie >= ciel) {
+                ESP_LOGW("izba", "Teplota zapnutia (%.1f) musí byť nižšia ako cieľová (%.1f) - regulácia vynechaná", zapnutie, ciel);
+                stav("Chyba nastavenia: teplota zapnutia >= cieľová");
+                return;
+              }
+
+              if (rezim == 1) {
+                // ---- REŽIM: POSUN EKVITERMICKEJ KRIVKY (0x4248) ----
+                // Posun = okamžitá časť + pomalé doťahovanie:
+                //  - okamžitá: -Zosilnenie × (izba - cieľ), iba keď je izba nad cieľom,
+                //  - doťahovanie: každých 30 min -0,5 °C, ak je izba > cieľ + 0,2,
+                //    a +0,5 °C, ak je izba < cieľ - 0,2. Vďaka nemu sa izba ustáli presne na cieli.
+                // Výsledok zaokrúhlený na 0,5 °C, v rozsahu "Maximálny posun krivky" (napr. -5)
+                // až "Maximálny kladný posun" (napr. +2) - kladný posun = teplejšia voda, keď je izba
+                // dlhšie pod cieľom. Pri teplote zapnutia a nižšej sa záporný posun hneď zruší.
+                // Pri výpadku senzora sa všetko vráti na 0.
+                const uint32_t MIN_ODSTUP_MS = 10UL * 60UL * 1000UL;  // max. 1 zmena za 10 min
+                const uint32_t KROK_MS = 30UL * 60UL * 1000UL;         // krok doťahovania
+                float aktualny = id(wl_posun).state;
+                float max_posun = id(posun_pri_prehriati).state;      // záporné číslo, napr. -5
+                float max_plus = id(posun_kladny_max).state;           // kladné číslo, napr. +2
+                float novy = NAN;
+                std::string sprava;
+
+                if (!cerstva) {
+                  novy = 0.0f;   // poistka: bez údajov z izby normálna krivka
+                  id(posun_i) = 0.0f;
+                  sprava = "Senzor nedostupný - normálna krivka (poistka)";
+                } else {
+                  float p = detska > ciel ? -id(posun_zosilnenie).state * (detska - ciel) : 0.0f;
+                  // prvý beh: doťahovanie nadviaže na aktuálny posun (bez skoku)
+                  if (isnan(id(posun_i)))
+                    id(posun_i) = isnan(aktualny) ? 0.0f : std::min(max_plus, std::max(max_posun, aktualny - p));
+                  // Doťahovanie:
+                  //  - izba na OPAČNEJ strane cieľa než doťahovanie (pod cieľom a voda znížená,
+                  //    alebo nad cieľom a voda zvýšená) -> rýchly návrat k 0: 1,0 °C každých 10 min,
+                  //  - inak pomalé doťahovanie 0,5 °C každých 30 min (mimo pásma cieľ ±0,2 °C).
+                  const uint32_t RYCHLO_MS = 10UL * 60UL * 1000UL;
+                  float vonku = id(vonk_teplota).state;
+                  float leto = id(fsv_4013).state;
+                  bool tuv_ide = id(ventil_3c).state.find("DHW") != std::string::npos;
+                  bool kuri = kurenie_on && !id(bolo_vypnute_blokovanim) && !tuv_ide &&
+                              !(!isnan(vonku) && !isnan(leto) && vonku > leto);
+                  if (detska <= zapnutie && id(posun_i) < 0.0f) id(posun_i) = 0.0f;   // chladno: hneď
+                  if (id(posun_i_cas) == 0) id(posun_i_cas) = millis();
+                  uint32_t od_kroku = millis() - id(posun_i_cas);
+                  bool proti = (detska < ciel && id(posun_i) < 0.0f) || (detska > ciel && id(posun_i) > 0.0f);
+                  if (proti && od_kroku >= RYCHLO_MS) {
+                    id(posun_i_cas) = millis();
+                    float pred = id(posun_i);
+                    id(posun_i) = pred < 0.0f ? std::min(0.0f, pred + 1.0f) : std::max(0.0f, pred - 1.0f);
+                    ESP_LOGI("izba", "Detská %.1f °C na opačnej strane cieľa - doťahovanie %.1f -> %.1f", detska, pred, id(posun_i));
+                  } else if (!proti && od_kroku >= KROK_MS) {
+                    id(posun_i_cas) = millis();
+                    // Pomalé doťahovanie OD nuly len keď TČ skutočne kúri - inak by sa počas
+                    // tarify, ohrevu TÚV, vypnutého kúrenia alebo letného vypnutia (FSV 4013)
+                    // zbytočne nabalilo (izba chladne, lebo sa nekúri, nie pre slabú krivku).
+                    if (kuri) {
+                      if (detska > ciel + 0.2f) id(posun_i) -= 0.5f;
+                      else if (detska < ciel - 0.2f) id(posun_i) += 0.5f;
+                    }
+                  }
+                  id(posun_i) = std::min(max_plus, std::max(max_posun, id(posun_i)));
+                  float spolu = roundf((p + id(posun_i)) * 2.0f) / 2.0f;
+                  novy = std::min(max_plus, std::max(max_posun, spolu));
+                  const char *kde = detska > ciel + 0.2f ? "Nad cieľom" : (detska < ciel - 0.2f ? "Pod cieľom" : "Na cieli");
+                  snprintf(buf, sizeof(buf), "%s %.1f °C - posun %.1f (okamžitý %.1f, doťahovanie %.1f%s)",
+                           kde, detska, novy, p, id(posun_i), kuri ? "" : ", pozastavené");
+                  sprava = buf;
+                }
+
+                // ---- HYBRID: posun na maxime nestačí -> dočasne vypnúť kúrenie ----
+                // Vypne, keď je posun na maxime a izba >= cieľ + "Hybrid: vypnúť pri prekročení".
+                // Zapne, keď izba klesne pod cieľ. Platí min. chod/pauza a drahá tarifa má prednosť.
+                float hyb = id(hybrid_prekrocenie).state;   // 0 = hybrid vypnutý
+                if (hyb > 0.0f && !id(bolo_vypnute_blokovanim)) {
+                  uint32_t od_zmeny_min = id(kurenie_posledna_zmena) == 0 ? UINT32_MAX
+                                          : (millis() - id(kurenie_posledna_zmena)) / 60000UL;
+                  uint32_t min_chod  = (uint32_t) id(min_chod_kurenia).state;
+                  uint32_t min_pauza = (uint32_t) id(min_pauza_kurenia).state;
+                  bool na_maxime = !isnan(aktualny) && aktualny <= max_posun + 0.05f;
+
+                  if (!cerstva) {
+                    if (id(regulacia_vypla_kurenie)) {
+                      ESP_LOGW("izba", "Hybrid: izbová teplota nedostupná - zapínam kúrenie (poistka)");
+                      id(regulacia_vypla_kurenie) = false;
+                      id(sw_kurenie).turn_on();
+                    }
+                  } else if (kurenie_on && na_maxime && detska >= ciel + hyb) {
+                    if (od_zmeny_min >= min_chod) {
+                      ESP_LOGI("izba", "Hybrid: posun na maxime, detská %.1f °C - vypínam kúrenie", detska);
+                      id(regulacia_vypla_kurenie) = true;
+                      id(sw_kurenie).turn_off();
+                      snprintf(buf, sizeof(buf), "Hybrid: prehriate %.1f °C - kúrenie vypnuté", detska);
+                    } else {
+                      snprintf(buf, sizeof(buf), "Hybrid: prehriate %.1f °C - čaká na min. chod %u/%u min",
+                               detska, (unsigned) od_zmeny_min, (unsigned) min_chod);
+                    }
+                    sprava = buf;
+                  } else if (!kurenie_on && id(regulacia_vypla_kurenie)) {
+                    if (detska >= ciel) {
+                      snprintf(buf, sizeof(buf), "Hybrid: kúrenie vypnuté (%.1f °C)", detska);
+                    } else if (od_zmeny_min >= min_pauza) {
+                      ESP_LOGI("izba", "Hybrid: detská %.1f °C pod cieľom - zapínam kúrenie", detska);
+                      id(regulacia_vypla_kurenie) = false;
+                      id(sw_kurenie).turn_on();
+                      snprintf(buf, sizeof(buf), "Hybrid: %.1f °C pod cieľom - kúrenie zapnuté", detska);
+                    } else {
+                      snprintf(buf, sizeof(buf), "Hybrid: %.1f °C - čaká na min. pauzu %u/%u min",
+                               detska, (unsigned) od_zmeny_min, (unsigned) min_pauza);
+                    }
+                    sprava = buf;
+                  }
+                }
+                stav(sprava);
+
+                bool zmena = !isnan(novy) && !isnan(aktualny) && fabsf(aktualny - novy) > 0.05f;
+                // Návrat na 0 (chladno / poistka) ide hneď, ostatné zmeny najviac raz za 10 min
+                bool smie = novy == 0.0f || id(posun_posledny_zapis) == 0 ||
+                            (millis() - id(posun_posledny_zapis)) >= MIN_ODSTUP_MS;
+                if (zmena && smie) {
+                  ESP_LOGI("izba", "Detská %.1f °C -> posun krivky %.1f -> %.1f °C", detska, aktualny, novy);
+                  // zápis poistky neblokuje návrat regulácie 10-min limitom
+                  if (cerstva) id(posun_posledny_zapis) = millis();
+                  auto call = id(wl_posun).make_call();
+                  call.set_value(novy);
+                  call.perform();
+                }
+                return;
+              }
+
+              // ---- REŽIM: VYPÍNANIE KÚRENIA (0x4000) ----
+              if (id(bolo_vypnute_blokovanim)) { stav("Drahá tarifa - rozhoduje tarifa"); return; }
+
+              if (!cerstva) {
+                // poistka: senzor nedodáva údaje -> nikdy nezostať bez kúrenia
+                if (id(regulacia_vypla_kurenie)) {
+                  ESP_LOGW("izba", "Izbová teplota nedostupná/stará - zapínam kúrenie (poistka)");
+                  id(regulacia_vypla_kurenie) = false;
+                  id(sw_kurenie).turn_on();
+                }
+                stav("Senzor nedostupný - kúrenie zapnuté (poistka)");
+                return;
+              }
+
+              uint32_t od_zmeny_min = id(kurenie_posledna_zmena) == 0 ? UINT32_MAX
+                                      : (millis() - id(kurenie_posledna_zmena)) / 60000UL;
+              uint32_t min_chod  = (uint32_t) id(min_chod_kurenia).state;
+              uint32_t min_pauza = (uint32_t) id(min_pauza_kurenia).state;
+
+              if (kurenie_on && detska >= ciel) {
+                if (od_zmeny_min >= min_chod) {
+                  ESP_LOGI("izba", "Detská %.1f °C >= %.1f °C - vypínam kúrenie", detska, ciel);
+                  id(regulacia_vypla_kurenie) = true;
+                  id(sw_kurenie).turn_off();
+                  snprintf(buf, sizeof(buf), "Prehriate %.1f °C - kúrenie vypnuté", detska);
+                } else {
+                  snprintf(buf, sizeof(buf), "Prehriate %.1f °C - čaká na min. chod %u/%u min",
+                           detska, (unsigned) od_zmeny_min, (unsigned) min_chod);
+                }
+              } else if (!kurenie_on && id(regulacia_vypla_kurenie)) {
+                if (detska > zapnutie) {
+                  snprintf(buf, sizeof(buf), "Kúrenie vypnuté reguláciou (%.1f °C)", detska);
+                } else if (od_zmeny_min >= min_pauza) {
+                  ESP_LOGI("izba", "Detská %.1f °C <= %.1f °C - zapínam kúrenie", detska, zapnutie);
+                  id(regulacia_vypla_kurenie) = false;
+                  id(sw_kurenie).turn_on();
+                  snprintf(buf, sizeof(buf), "Chladno %.1f °C - kúrenie zapnuté", detska);
+                } else {
+                  snprintf(buf, sizeof(buf), "Chladno %.1f °C - čaká na min. pauzu %u/%u min",
+                           detska, (unsigned) od_zmeny_min, (unsigned) min_pauza);
+                }
+              } else if (!kurenie_on) {
+                snprintf(buf, sizeof(buf), "Kúrenie vypnuté ručne (%.1f °C)", detska);
+              } else {
+                snprintf(buf, sizeof(buf), "Kúrenie beží (%.1f °C)", detska);
+              }
+              stav(buf);
+
+  # FSV body krivky - TČ ich neposiela sama, čítajú sa na požiadanie
+  - interval: 30min
+    startup_delay: 60s
+    then:
+      - samsung_nasa.request_read:
+          id: [fsv_2011, fsv_2012, fsv_2021, fsv_2022, fsv_2031, fsv_2032, fsv_2041, fsv_4013]
+
+uart:
+  id: uart_nasa
+  tx_pin: GPIO19
+  rx_pin: GPIO22
+  baud_rate: 9600
+  parity: EVEN
+ 
+external_components:
+  - source: github://Beormund/esphome-samsung-nasa@main
+    components: [samsung_nasa]
+ 
+#########################################################################
+# SAMSUNG NASA ZBERNICA A ZARIADENIA
+#########################################################################
+samsung_nasa:
+  uart_id: uart_nasa
+  id: nasa_controller
+  nasa_client: {}
+  devices:
+    - id: outdoor_unit
+      address: "10.00.00" # Vonkajšia jednotka AE120JXEDGH
+    - id: indoor_unit
+      address: "20.00.00" # Hydrobox AE160JNYDGH
+ 
+#########################################################################
+# PREPÍNAČE (Zapnutie - Vypnutie)
+#########################################################################
+switch:
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    id: sw_kurenie
+    name: "Kúrenie"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 1
+    message: 0x4000
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    id: sw_tuv
+    name: "Ohrev TÚV"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 2
+    message: 0x4065
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Tichý režim (Quiet)"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 3
+    message: 0x4046
+ 
+  # Zapnutý = cieľ izby podľa časového plánu, vypnutý = pevná "Cieľová izbová teplota"
+  - platform: template
+    name: "Časový plán izby"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 1
+    entity_category: config
+    id: plan_aktivny
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    name: "Blokovanie drahej tarify (Aktívne)"
+    web_server:
+      sorting_group_id: g_tarifa
+      sorting_weight: 1
+    entity_category: config
+    id: tariff_block_enable
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+ 
+#########################################################################
+# NASTAVENIE ČASOV A TEPLÔT (ČISTÉ ČÍSELNÉ POLE - BOX)
+#########################################################################
+number:
+  - platform: template
+    name: "Cieľová izbová teplota"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 1
+    entity_category: config
+    id: user_cielova_teplota
+    min_value: 15
+    max_value: 30
+    step: 0.5
+    initial_value: 23.0
+    optimistic: true
+    restore_value: true
+    mode: box
+ 
+  - platform: template
+    name: "Teplota zapnutia kúrenia"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 2
+    entity_category: config
+    id: user_teplota_zapnutia
+    min_value: 15
+    max_value: 30
+    step: 0.5
+    initial_value: 22.0
+    optimistic: true
+    restore_value: true
+    mode: box
+ 
+  - platform: template
+    name: "Tarifa Ranný začiatok (hod)"
+    web_server:
+      sorting_group_id: g_tarifa
+      sorting_weight: 2
+    entity_category: config
+    id: tarifa_ranny_zaciatok
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 8
+    optimistic: true
+    restore_value: true
+    mode: box
+ 
+  - platform: template
+    name: "Tarifa Ranný koniec (hod)"
+    web_server:
+      sorting_group_id: g_tarifa
+      sorting_weight: 3
+    entity_category: config
+    id: tarifa_ranny_koniec
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 9
+    optimistic: true
+    restore_value: true
+    mode: box
+ 
+  - platform: template
+    name: "Tarifa Večerný začiatok (hod)"
+    web_server:
+      sorting_group_id: g_tarifa
+      sorting_weight: 4
+    entity_category: config
+    id: tarifa_vecerny_zaciatok
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 18
+    optimistic: true
+    restore_value: true
+    mode: box
+ 
+  - platform: template
+    name: "Tarifa Večerný koniec (hod)"
+    web_server:
+      sorting_group_id: g_tarifa
+      sorting_weight: 5
+    entity_category: config
+    id: tarifa_vecerny_koniec
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 19
+    optimistic: true
+    restore_value: true
+    mode: box
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Cieľová teplota TÚV"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 7
+    message: 0x4235
+    mode: box
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    id: ciekova_voda_entity
+    name: "Cieľová teplota vykurovacej vody"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 8
+    message: 0x4247
+    mode: box
+
+  # Posun ekvitermickej krivky (Water Law Target), overené: 0 = normálna krivka, -2 zníži vodu o 2 °C
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    id: wl_posun
+    name: "Posun ekvitermickej krivky"
+    web_server:
+      sorting_group_id: g_izba
+      sorting_weight: 5
+    message: 0x4248
+    mode: box
+
+  - platform: template
+    name: "Maximálny posun krivky"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 3
+    entity_category: config
+    id: posun_pri_prehriati
+    min_value: -5
+    max_value: 0
+    step: 0.5
+    initial_value: -5
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  # --- Časový plán izby: cieľová teplota pre každé pásmo ---
+  - platform: template
+    name: "Plán Noc - teplota"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 9
+    entity_category: config
+    id: plan_noc_tep
+    min_value: 15
+    max_value: 30
+    step: 0.5
+    initial_value: 21.0
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  - platform: template
+    name: "Plán Ráno - teplota"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 3
+    entity_category: config
+    id: plan_rano_tep
+    min_value: 15
+    max_value: 30
+    step: 0.5
+    initial_value: 22.5
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  - platform: template
+    name: "Plán Deň - teplota"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 5
+    entity_category: config
+    id: plan_den_tep
+    min_value: 15
+    max_value: 30
+    step: 0.5
+    initial_value: 22.0
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  - platform: template
+    name: "Plán Večer - teplota"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 7
+    entity_category: config
+    id: plan_vecer_tep
+    min_value: 15
+    max_value: 30
+    step: 0.5
+    initial_value: 23.0
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  # kúrenie / normálna krivka sa vráti, keď izba klesne o túto hodnotu pod cieľ pásma
+  - platform: template
+    name: "Plán - hysteréza"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 10
+    entity_category: config
+    id: plan_hysterezia
+    min_value: 0.5
+    max_value: 3
+    step: 0.5
+    initial_value: 1.0
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  # o koľko °C môže doťahovanie vodu zvýšiť, keď je izba dlhšie pod cieľom (0 = iba znižovanie)
+  - platform: template
+    name: "Maximálny kladný posun krivky"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 3.5
+    entity_category: config
+    id: posun_kladny_max
+    min_value: 0
+    max_value: 5
+    step: 0.5
+    initial_value: 2
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  # o koľko °C sa zníži voda za každý 1 °C v izbe nad cieľom (okamžitá časť posunu)
+  - platform: template
+    name: "Zosilnenie posunu krivky"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 4
+    entity_category: config
+    id: posun_zosilnenie
+    min_value: 0
+    max_value: 5
+    step: 0.5
+    initial_value: 2
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  # Hybrid v režime Posun krivky: o koľko nad cieľom pri posune na maxime vypnúť kúrenie (0 = hybrid vypnutý)
+  - platform: template
+    name: "Hybrid: vypnúť kúrenie pri prekročení o"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 4.5
+    entity_category: config
+    id: hybrid_prekrocenie
+    min_value: 0
+    max_value: 3
+    step: 0.5
+    initial_value: 1.0
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  # --- Body ekvitermickej krivky v TČ (FSV). Zmena hodnoty sa ZAPÍŠE do TČ! ---
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2011
+    id: fsv_2011
+    name: "FSV 2011 Vonku najchladnejšie"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 2
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2012
+    id: fsv_2012
+    name: "FSV 2012 Vonku najteplejšie"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 3
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2021
+    id: fsv_2021
+    name: "FSV 2021 WL1 voda pri najchladnejšom"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 4
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2022
+    id: fsv_2022
+    name: "FSV 2022 WL1 voda pri najteplejšom"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 5
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2031
+    id: fsv_2031
+    name: "FSV 2031 WL2 voda pri najchladnejšom"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 6
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2032
+    id: fsv_2032
+    name: "FSV 2032 WL2 voda pri najteplejšom"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 7
+
+  # Nad touto vonkajšou teplotou TČ prestane kúriť (TÚV beží ďalej)
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 4013
+    id: fsv_4013
+    name: "FSV 4013 Vypnutie kúrenia nad vonk. teplotou"
+    mode: box
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 8
+
+  - platform: template
+    name: "Minimálny chod kúrenia (min)"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 5
+    entity_category: config
+    id: min_chod_kurenia
+    min_value: 0
+    max_value: 240
+    step: 5
+    initial_value: 60
+    optimistic: true
+    restore_value: true
+    mode: box
+
+  - platform: template
+    name: "Minimálna pauza kúrenia (min)"
+    web_server:
+      sorting_group_id: g_nastav
+      sorting_weight: 6
+    entity_category: config
+    id: min_pauza_kurenia
+    min_value: 0
+    max_value: 240
+    step: 5
+    initial_value: 45
+    optimistic: true
+    restore_value: true
+    mode: box
+
+#########################################################################
+# ČASOVÝ PLÁN IZBY - ZAČIATKY PÁSIEM (poradie je ľubovoľné)
+#########################################################################
+#########################################################################
+# EKVITERMICKÁ KRIVKA V TČ (FSV) - periodické čítanie je v sekcii interval vyššie
+# Pozor: zmena hodnoty v HA/na webe sa okamžite zapíše do TČ!
+#########################################################################
+button:
+  - platform: template
+    name: "Načítať krivku z TČ"
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 0
+    on_press:
+      - samsung_nasa.request_read:
+          id: [fsv_2011, fsv_2012, fsv_2021, fsv_2022, fsv_2031, fsv_2032, fsv_2041, fsv_4013]
+
+datetime:
+  - platform: template
+    type: time
+    name: "Plán Noc - začiatok"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 8
+    entity_category: config
+    id: plan_noc_zac
+    optimistic: true
+    restore_value: true
+    initial_value: "21:00"
+
+  - platform: template
+    type: time
+    name: "Plán Ráno - začiatok"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 2
+    entity_category: config
+    id: plan_rano_zac
+    optimistic: true
+    restore_value: true
+    initial_value: "06:00"
+
+  - platform: template
+    type: time
+    name: "Plán Deň - začiatok"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 4
+    entity_category: config
+    id: plan_den_zac
+    optimistic: true
+    restore_value: true
+    initial_value: "08:00"
+
+  - platform: template
+    type: time
+    name: "Plán Večer - začiatok"
+    web_server:
+      sorting_group_id: g_plan
+      sorting_weight: 6
+    entity_category: config
+    id: plan_vecer_zac
+    optimistic: true
+    restore_value: true
+    initial_value: "16:00"
+
+#########################################################################
+# VÝBER REŽIMOV
+#########################################################################
+select:
+  # Ktorú krivku TČ používa: WL1 (FSV 2021/2022) alebo WL2 (FSV 2031/2032)
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    fsv: 2041
+    id: fsv_2041
+    name: "FSV 2041 Typ krivky WL1 alebo WL2"
+    entity_category: config
+    web_server:
+      sorting_group_id: g_krivka
+      sorting_weight: 1
+
+  # Ako sa berie do úvahy teplota v detskej izbe
+  - platform: template
+    name: "Režim izbovej regulácie"
+    web_server:
+      sorting_group_id: g_izba
+      sorting_weight: 1
+    id: izba_rezim
+    options:
+      - "Vypnutá"
+      - "Posun krivky"
+      - "Vypínanie kúrenia"
+    initial_option: "Posun krivky"
+    optimistic: true
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            // Pri odchode z režimu upratať po ňom, aby nič nezostalo "visieť"
+            if (i != 1) id(posun_i) = NAN;
+            if (i != 1 && !isnan(id(wl_posun).state) && fabsf(id(wl_posun).state) > 0.05f) {
+              ESP_LOGI("izba", "Režim zmenený - vraciam posun krivky na 0");
+              auto call = id(wl_posun).make_call();
+              call.set_value(0.0f);
+              call.perform();
+            }
+            if (i != 2 && id(regulacia_vypla_kurenie)) {
+              id(regulacia_vypla_kurenie) = false;
+              if (id(bolo_vypnute_blokovanim)) {
+                id(kurenie_bolo_zapnute) = true;   // zapne sa po skončení tarify
+              } else {
+                ESP_LOGI("izba", "Režim zmenený - zapínam kúrenie vypnuté reguláciou");
+                id(sw_kurenie).turn_on();
+              }
+            }
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Režim kúrenia"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 4
+    message: 0x4001
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Režim TÚV"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 5
+    message: 0x4066
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Rýchly ohrev TÚV (Boost)"
+    web_server:
+      sorting_group_id: g_tc
+      sorting_weight: 6
+    message: 0x406F
+ 
+#########################################################################
+# TEXTOVÉ SENZORY (Stav 3-cestného ventilu)
+#########################################################################
+text_sensor:
+  # Čo izbová regulácia práve robí (aktualizuje sa každú minútu z časovej logiky)
+  - platform: template
+    name: "Stav izbovej regulácie"
+    web_server:
+      sorting_group_id: g_izba
+      sorting_weight: 2
+    id: izba_stav
+    update_interval: never
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "3-cestný ventil (Smer ohrevu)"
+    id: ventil_3c
+    web_server:
+      sorting_group_id: g_teploty
+      sorting_weight: 6
+    message: 0x4067
+
+  # Prevádzkový režim vonkajšej jednotky (Normal, Stop, Deice, Safety, Comp Down, Prohibit...)
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Režim vonkajšej jednotky"
+    message: 0x8001
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 0
+
+#########################################################################
+# BINÁRNE SENZORY (pre technickú diagnostiku cyklov)
+#########################################################################
+binary_sensor:
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Odmrazovanie"
+    message: 0x402E
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 0.1
+
+  # ON = vnútorná jednotka žiada teplo (termostat zopnutý)
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Termostat (požiadavka na teplo)"
+    message: 0x4028
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 0.2
+
+  # --- Doplnené 10. 11. 2026: stav obehového čerpadla a elektrických dohrevov (iba čítanie) ---
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Obehové čerpadlo"
+    message: 0x4089
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 0.3
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Elektrický dohrev kúrenia (Backup heater)"
+    message: 0x406C
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 0.4
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Elektrický dohrev TÚV (Booster heater)"
+    message: 0x4087
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 0.5
+ 
+#########################################################################
+# SENZORY (TEPLOTY, PRÍKON, SPOTREBA)
+#########################################################################
+sensor:
+  # Teplota v detskej izbe z Home Assistanta - izbový senzor ESPresense (AHTx0),
+  # nie hlavica pri radiátore (tá pri kúrení ukazovala viac, než je v izbe).
+  # Pôvodne: sensor.detska_radiator_local_temperature, potom sensor.espresense_detska_izba_ahtx0_temperature
+  - platform: homeassistant
+    id: detska_teplota
+    entity_id: sensor.detska_izba_espresense_detska_izba_detska_izba_teplota
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (!isnan(x)) id(detska_posledna_aktualizacia) = millis();
+
+  # --- Teploty izieb z HA - iba na sledovanie (monitoring), regulácia ich nepoužíva ---
+  - platform: homeassistant
+    name: "Izba Jedáleň"
+    entity_id: sensor.0x00124b0029114db8_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 1}
+  - platform: homeassistant
+    name: "Radiátor Jedáleň (hlavica)"
+    entity_id: sensor.jedalen_radiator_local_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 2}
+  - platform: homeassistant
+    name: "Izba Obývačka"
+    entity_id: sensor.obyvacka_t_h_cidlo_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 3}
+  - platform: homeassistant
+    name: "Izba Detská (Zigbee)"
+    entity_id: sensor.detska_t_h_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 4}
+  - platform: homeassistant
+    name: "Izba Kúpeľňa"
+    entity_id: sensor.kupelna_t_h_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 5}
+  - platform: homeassistant
+    name: "Izba Spálňa"
+    entity_id: sensor.spalna_t_h_cidlo_2_kruhovy_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 6}
+  - platform: homeassistant
+    name: "Izba Pracovňa"
+    entity_id: sensor.pracovna_t_h_cidlo_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 7}
+  - platform: homeassistant
+    name: "Izba Kuchyňa"
+    entity_id: sensor.t_h_kuchyna_temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    web_server: {sorting_group_id: g_izby, sorting_weight: 8}
+ 
+  # Šablónový senzor pre webserver ESP32 a Home Assistant
+  - platform: template
+    name: "Sledovaná teplota (Detská izba)"
+    web_server:
+      sorting_group_id: g_izba
+      sorting_weight: 4
+    id: sledovana_teplota_web
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      return id(detska_teplota).state;
+ 
+  # Aktuálne platná cieľová teplota izby (podľa časového plánu alebo pevná)
+  - platform: template
+    name: "Aktuálna cieľová teplota izby"
+    web_server:
+      sorting_group_id: g_izba
+      sorting_weight: 3
+    id: izba_ciel_sensor
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      return id(izba_aktualny_ciel);
+
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Teplota TÚV (Bojler)"
+    web_server:
+      sorting_group_id: g_teploty
+      sorting_weight: 4
+    message: 0x4237
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Výstupná teplota vody (Tw2)"
+    web_server:
+      sorting_group_id: g_teploty
+      sorting_weight: 1
+    id: tw2_temp
+    message: 0x4238
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Spiatočka (Tw1)"
+    web_server:
+      sorting_group_id: g_teploty
+      sorting_weight: 2
+    id: tw1_temp
+    message: 0x4236
+ 
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    # Overené testom: reaguje na posun krivky (41,2 -> 39,2 pri posune -2)
+    name: "Cieľová ekvitermická voda (WL)"
+    web_server:
+      sorting_group_id: g_izba
+      sorting_weight: 6
+    message: 0x4202
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Vonkajšia teplota"
+    id: vonk_teplota
+    web_server:
+      sorting_group_id: g_teploty
+      sorting_weight: 5
+    message: 0x8204
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Teplota vonkajšieho výmenníka"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 4
+    entity_category: diagnostic
+    message: 0x8218
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Vysoký tlak"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 3
+    entity_category: diagnostic
+    message: 0x8206
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Teplota výtlaku kompresora"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 2
+    entity_category: diagnostic
+    message: 0x820A
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Povelová frekvencia kompresora"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 6
+    entity_category: diagnostic
+    message: 0x8236
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Bezpečnostný štart vonk. jednotky"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 8
+    entity_category: diagnostic
+    message: 0x8248
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Prúd kompresora (CT1)"
+    web_server:
+      sorting_group_id: g_spotreba
+      sorting_weight: 3
+    id: tc_current
+    message: 0x8217
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Frekvencia kompresora"
+    web_server:
+      sorting_group_id: g_spotreba
+      sorting_weight: 4
+    id: tc_freq
+    message: 0x8238
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Cieľová frekvencia kompresora"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 5
+    entity_category: diagnostic
+    message: 0x8237
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Otáčky ventilátora"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 7
+    entity_category: diagnostic
+    message: 0x823D
+ 
+  - platform: samsung_nasa
+    nasa_device_id: outdoor_unit
+    name: "Chybový kód TČ"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 1
+    entity_category: diagnostic
+    message: 0x8235
+
+  # --- Doplnené 10. 11. 2026: otáčky obehového čerpadla (iba čítanie) ---
+  # Prietok 0x42E9, vyrobené teplo 0x4427 a merač spotreby 0x8414 jednotka gen. J (2018) neposiela - odstránené.
+  # Ak jednotka (gen. J, 2018) niektorú správu neposiela, senzor ostane "unknown".
+  - platform: samsung_nasa
+    nasa_device_id: indoor_unit
+    name: "Otáčky obehového čerpadla (PWM)"
+    web_server:
+      sorting_group_id: g_diag
+      sorting_weight: 3
+    message: 0x40C4
+ 
+  - platform: template
+    name: "Delta T vykurovacej vody"
+    web_server:
+      sorting_group_id: g_teploty
+      sorting_weight: 3
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      if (!isnan(id(tw2_temp).state) && !isnan(id(tw1_temp).state)) {
+        return id(tw2_temp).state - id(tw1_temp).state;
+      }
+      return NAN;
+ 
+  - platform: template
+    name: "Odhadovaný príkon TČ"
+    web_server:
+      sorting_group_id: g_spotreba
+      sorting_weight: 1
+    id: estimated_power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      if (!isnan(id(tc_current).state) && id(tc_current).state > 0.2) {
+        return (id(tc_current).state * 230.0 * 3.0 * 0.90) + 60.0;
+      }
+      if (!isnan(id(tc_freq).state) && id(tc_freq).state > 5.0) {
+        return (id(tc_freq).state * 42.0) + 80.0;
+      }
+      return 15.0;
+ 
+  - platform: total_daily_energy
+    name: "Denná spotreba TČ"
+    web_server:
+      sorting_group_id: g_spotreba
+      sorting_weight: 2
+    power_id: estimated_power
+    unit_of_measurement: "kWh"
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001
+ 

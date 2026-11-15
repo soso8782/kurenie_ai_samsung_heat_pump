@@ -6,7 +6,8 @@ Slučka `contacts_loop` beží ako daemon vlákno v procese agenta. Iba štandar
 """
 import json, time, traceback, unicodedata, urllib.error, urllib.request
 from datetime import datetime, timezone
-from common import ROOMS, S, adb, get_state, load_cfg, set_state, tcq
+import profil
+from common import ROOMS, ROOM_NAMES, S, adb, get_state, load_cfg, set_state, tcq
 import notify
 
 DEVICE_CLASSES = ("door", "window", "opening", "garage_door")
@@ -25,14 +26,31 @@ TEMPLATE = (
     "{{ ns.r | tojson }}"
 )
 
-DEFAULT_GROUPS = [("Obývačka", "obyvacka"), ("Detská", "detska"), ("Jedáleň", "jedalen"), ("Kuchyňa", "kuchyna"),
-                  ("Spálňa", "spalna"), ("Pracovňa", "pracovna"), ("Kúpeľňa", "kupelna"), ("Chodba", None), ("Ostatné", None)]
 OTHER_NAME = "Ostatné"
+_P = profil.load()
+# predvolené skupiny: izby z profilu (v poradí profilu), potom Chodba a Ostatné; predvolený profil = pôvodné skupiny z v1
+_LEGACY_ORDER = ("obyvacka", "detska", "jedalen", "kuchyna", "spalna", "pracovna", "kupelna")
+_rooms = list(profil.room_keys(_P))
+if set(_rooms) == set(_LEGACY_ORDER):
+    _rooms = list(_LEGACY_ORDER)
+DEFAULT_GROUPS = [(ROOM_NAMES[k], k) for k in _rooms] + [("Chodba", None), ("Ostatné", None)]
 # kľúčové slová (bez diakritiky, malé písmená) -> kľúč izby; "chodba" = skupina Chodba (bez izby)
-KEYWORDS = (("obyvack", "obyvacka"), ("detsk", "detska"), ("jedal", "jedalen"), ("kuchyn", "kuchyna"), ("spaln", "spalna"),
-            ("pracovn", "pracovna"), ("kupel", "kupelna"), ("chodb", "chodba"))
+_LEGACY_KW = {"obyvacka": "obyvack", "detska": "detsk", "jedalen": "jedal", "kuchyna": "kuchyn", "spalna": "spaln",
+              "pracovna": "pracovn", "kupelna": "kupel"}
+
+
+def _room_keyword(key, name):
+    if key in _LEGACY_KW:
+        return _LEGACY_KW[key]
+    n = "".join(ch for ch in unicodedata.normalize("NFKD", str(name or key).lower()) if not unicodedata.combining(ch)).strip()
+    n = (n.split() or [key])[0]            # prvé slovo názvu; bez posledného písmena sa zhodne aj s ohýbanými tvarmi
+    return n[:max(4, len(n) - 1)]
+
+
+KEYWORDS = tuple((_room_keyword(k, ROOM_NAMES[k]), k) for k in _rooms) + (("chodb", "chodba"),)
 FORCE_OTHER = ("skoda", "octavia", "umyvacka", "rura")      # auto a spotrebiče: skupina „Ostatné“, predvolene vypnuté
 DEFAULT_OFF = FORCE_OTHER + ("radiator",)                    # hlavica radiátora len odhaduje okno: predvolene vypnutá
+# voliteľné: konkrétny pokazený senzor pôvodného domu; ak taká entita v HA neexistuje, nestane sa nič
 KITCHEN_DOOR = "binary_sensor.kuchyna_dvere_kontakt_sensor_contact"
 KITCHEN_DOOR_NOTE = "pokazený – odpadnutý magnet (10. 11. 2026)"
 _UNSET = object()
@@ -713,7 +731,7 @@ def day_open_minutes(c, a, b, now=None):
 
 def _outside_temp(cfg):
     try:
-        r = tcq(cfg, "SELECT value FROM samples WHERE entity=? ORDER BY ts DESC LIMIT 1", (S["vonku"],))
+        r = tcq(cfg, "SELECT value FROM samples WHERE entity=? ORDER BY ts DESC LIMIT 1", (S.get("vonku", ""),))
         return r[0][0] if r and r[0][0] is not None else None
     except Exception:
         return None

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Zásahy (ručné aj agentove) a ich deterministické vyhodnotenie po 24 hodinách (SPEC bod 3). Iba štandardná knižnica."""
 import json, re, time
-from common import ROOMS, ROOM_NAMES, SETTINGS, get_state, hour_stats, set_state, tcq
+from common import REF_NAME, REF_ROOM, ROOMS, ROOM_NAMES, SETTINGS, get_state, hour_stats, set_state, tcq
 import contacts, notify
 from common import adb
 
@@ -10,7 +10,7 @@ KINDS = ("ventil", "krivka", "nastavenie", "vetranie", "ine")
 EVAL_AFTER_S = 24 * 3600
 MIN_HOURS = 20                      # minimum hodín s dátami v každom okne
 GIVE_UP_S = 72 * 3600               # ak ani 72 h po termíne nie sú dáta, zásah sa uzavrie ako "nedostatok dát"
-CURVE_ENTITIES = (SETTINGS["fsv2031"], SETTINGS["fsv2032"])
+CURVE_ENTITIES = tuple(SETTINGS[k] for k in ("fsv2031", "fsv2032") if k in SETTINGS)
 AGENT_MATCH_S = 180                 # zmena nastavenia do ±3 min od akcie agenta = zmena agenta
 
 
@@ -108,7 +108,7 @@ def window_stats(cfg, a, b, c=None):
         return round(sum(xs) / len(xs), 2) if xs else None
 
     rooms = {r: avg(r) for r in ROOMS}
-    diff = {r: (None if rooms[r] is None or rooms["detska"] is None else round(rooms[r] - rooms["detska"], 2)) for r in ROOMS[1:]}
+    diff = {r: (None if rooms[r] is None or rooms[REF_ROOM] is None else round(rooms[r] - rooms[REF_ROOM], 2)) for r in ROOMS[1:]}
     vonku = avg("vonku")
     kwh = round(sum(h.get("kwh") or 0 for h in ok), 2)
     kns = round(kwh / (23 - vonku), 3) if len(ok) >= MIN_HOURS and vonku is not None and 23 - vonku > 3 and kwh > 0 else None
@@ -161,16 +161,16 @@ def verdict(iv, before, after, delta):
     if dd:
         r, v = max(dd.items(), key=lambda kv: abs(kv[1]))
         if abs(v) >= 0.2:
-            parts.append("Voči detskej sa najviac zmenila izba %s: rozdiel %s → %s °C (%s)." % (
-                ROOM_NAMES.get(r, r).lower(), sk(before["diff"].get(r), 1, True), sk(after["diff"].get(r), 1, True), sk(v, 1, True)))
+            parts.append("Voči referenčnej izbe (%s) sa najviac zmenila izba %s: rozdiel %s → %s °C (%s)." % (
+                REF_NAME, ROOM_NAMES.get(r, r).lower(), sk(before["diff"].get(r), 1, True), sk(after["diff"].get(r), 1, True), sk(v, 1, True)))
         else:
-            parts.append("Žiadna izba sa voči detskej nezmenila o viac než 0,2 °C.")
+            parts.append("Žiadna izba sa voči referenčnej izbe (%s) nezmenila o viac než 0,2 °C." % REF_NAME)
     else:
-        parts.append("Rozdiely izieb voči detskej sa nedali porovnať (chýbajú dáta).")
+        parts.append("Rozdiely izieb voči referenčnej izbe (%s) sa nedali porovnať (chýbajú dáta)." % REF_NAME)
     room, dr = iv.get("room"), direction(iv.get("text"))
     if room in ROOMS:
-        v = delta["rooms"].get("detska") if room == "detska" else delta["diff"].get(room)
-        what = "teplota" if room == "detska" else "rozdiel voči detskej"
+        v = delta["rooms"].get(REF_ROOM) if room == REF_ROOM else delta["diff"].get(room)
+        what = "teplota" if room == REF_ROOM else "rozdiel voči referenčnej izbe"
         if v is None:
             s = "Cieľovú izbu (%s) sa nepodarilo porovnať." % ROOM_NAMES[room].lower()
         elif dr and abs(v) >= 0.2:

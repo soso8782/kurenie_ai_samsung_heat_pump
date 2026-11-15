@@ -1,0 +1,23 @@
+{
+ "id": "AE040JXEDEH",
+ "nazov": "Samsung EHS Split 4 kW outdoor unit AE040JXEDEH (R410A)",
+ "typ": "split",
+ "vykon_kw": 4.0,
+ "chladivo": "R410A",
+ "zdroj": "Samsung EHS Split Technical Data Book (Europe, 50 Hz), Ver. 1.6, II. Outdoor Unit, 2. Capacity Tables, 1) Maximum Heating Capacity (Peak Value), AE040JXEDEH/EU; https://images.samsung.com/is/content/samsung/p5/common/techinfo/common-techinfo-ehs-idu-and-odu-split-for-europe-50hz-ver1-6-tdb.pdf . HC/PI podľa Eurovent OM-3-2015, bez odmrazovania (EN14511); null = mimo rozsahu tabuľky. Bunka Tamb=-10 / LWT=35 je v zdroji zjavne chybná (HC nesedí s okolitými hodnotami), preto je vynechaná (null).",
+ "overene": false,
+ "ta": [-20, -15, -10, -7, -2, 2, 7, 10, 15, 20],
+ "lw": [25, 30, 35, 40, 45, 50, 55],
+ "peak": {
+  "-20": [[3.35, 1.02], [3.39, 1.3], [3.43, 1.59], [3.48, 1.88], null, null, null],
+  "-15": [[3.65, 1.02], [3.69, 1.3], [3.74, 1.59], [3.8, 1.88], [3.86, 2.18], null, null],
+  "-10": [[3.82, 1.0], [3.93, 1.28], null, [4.19, 1.85], [4.33, 2.14], [4.5, 2.44], [4.68, 2.74]],
+  "-7": [[3.92, 0.99], [4.07, 1.27], [4.24, 1.55], [4.42, 1.83], [4.62, 2.12], [4.83, 2.41], [5.08, 2.71]],
+  "-2": [[4.18, 0.86], [4.32, 1.11], [4.47, 1.36], [4.63, 1.62], [4.8, 1.88], [4.99, 2.14], [5.2, 2.4]],
+  "2": [[4.29, 0.71], [4.41, 0.92], [4.53, 1.14], [4.67, 1.36], [4.82, 1.59], [4.98, 1.81], [5.15, 2.04]],
+  "7": [[4.6, 0.52], [4.5, 0.69], [4.4, 0.86], [4.3, 1.03], [4.2, 1.2], [4.1, 1.37], [4.0, 1.54]],
+  "10": [[4.73, 0.53], [4.64, 0.7], [4.56, 0.87], [4.47, 1.05], [4.38, 1.22], [4.3, 1.39], [4.21, 1.56]],
+  "15": [[4.95, 0.55], [4.89, 0.72], [4.82, 0.9], [4.75, 1.07], [4.69, 1.24], [4.62, 1.42], [4.56, 1.59]],
+  "20": [[5.17, 0.57], [5.13, 0.75], [5.08, 0.92], [5.04, 1.1], [4.99, 1.27], [4.95, 1.44], [4.9, 1.62]]
+ }
+}

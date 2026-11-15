@@ -94,7 +94,7 @@ def sync(cfg):
     """Prepočíta a naimportuje celé štatistiky spotreby a nákladov. Vracia {"hodin", "kwh", "spolu_eur", "do"} alebo vyhodí výnimku."""
     import ha_ws
     url, token = (cfg.get("HA_URL") or "").strip(), (cfg.get("HA_TOKEN") or "").strip()
-    if not url or not token:
+    if not url or not token or not ha_ws.ENERGY_EXT_ID:   # bez nastaveného elektromera sa náklady nepočítajú
         return None
     cli = ha_ws.HAClient()
     try:

@@ -3,7 +3,7 @@
 [![Verzia](https://img.shields.io/github/v/tag/soso8782/kurenie_ai_samsung_heat_pump?label=verzia&sort=semver)](https://github.com/soso8782/kurenie_ai_samsung_heat_pump/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Aktuálna verzia: 1.0.0** (15. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
+**Aktuálna verzia: 2.0.0** (15. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
 
 Domáci systém, ktorý zbiera dáta z tepelného čerpadla **Samsung EHS** (cez NASA zbernicu a ESPHome), počíta skutočnú spotrebu
 a COP, sleduje teploty v izbách a pomocou jazykového modelu (cez [OpenRouter](https://openrouter.ai)) **radí alebo priamo
@@ -60,6 +60,8 @@ Home Assistant (izby, kontakty, elektromer) <──WS/REST/MQTT──> agent.py 
 | `interventions.py`, `abtest.py` | zásahy (ventily…) s vyhodnotením, A/B test nastavení |
 | `notify.py`, `webpush.py` | upozornenia (HA webhook, Web Push s VAPID) |
 | `cftunnel.py`, `cfjwt.py` | Cloudflare Tunnel a overovanie Cloudflare Access JWT |
+| `profil.py`, `profil.example.json`, `modely/` | profil inštalácie (zariadenie, entity, izby, mantinely) a knižnica modelov |
+| `esphome/`, `docs/` | vzorová konfigurácia ESPHome a dokumentácia profilu |
 | `monitor/` | pôvodný jednoduchý monitor (port 8099) |
 | `SPEC*.md` | návrhy jednotlivých funkcií |
 | `test_*.py`, `t_*.py` | testy (unittest) |
@@ -69,7 +71,7 @@ Home Assistant (izby, kontakty, elektromer) <──WS/REST/MQTT──> agent.py 
 - Tepelné čerpadlo Samsung EHS (testované: Split gen. J, AE120JXEDGH + hydrobox AE160JNYDGH, 2018, R410A).
 - ESPHome most na NASA zbernici, napr. M5Stack Atom s komponentom
   [`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa) a `web_server` (REST + SSE).
-  Názvy entít, ktoré kód očakáva, sú v `common.py` (`S`) a `stats.py` (`TC`).
+  Názvy entít, ktoré kód očakáva, sú v profile (`profil.json`, predvolené v `profil.py`); vzorový YAML je v `esphome/samsung-ehs.yaml`.
 - Linux (Debian 12/13 LXC stačí), Python 3.11+, systemd. Žiadne ďalšie balíčky.
 - Voliteľne: Home Assistant (izby, kontakty, elektromer, Energy panel), MQTT broker, OpenRouter kľúč, Cloudflare účet.
 
@@ -104,9 +106,32 @@ python3 -m unittest test_cop test_spotreba test_vonku test_mqtt
 
 ## Prispôsobenie
 
-Kód vznikol pre konkrétny dom (izby, entity v HA, cenník SSE/SSD na Slovensku). Pri inej inštalácii uprav najmä:
-`ROOMS`/`ROOM_NAMES` a mapovanie entít v `common.py` a `stats.py`, ID elektromera (`ENERGY_EXT_ID`, `ENERGY_METER_IDS`
-v `ha_ws.py` – dajú sa nastaviť premennými prostredia) a cenníky `TARIFF` v `ha_cost.py`.
+Inštalačne špecifické veci (izby, názvy entít v ESP, typ kúrenia, mantinely agenta, zdroje histórie z HA, model zariadenia)
+sú od verzie 2.0 v **profile** (`profil.json`), nie v kóde – pozri [docs/PROFIL.md](docs/PROFIL.md) a sekciu
+[Iné tepelné čerpadlo / vlastný dom](#iné-tepelné-čerpadlo--vlastný-dom). Zvyšok:
+ID elektromera (`ENERGY_EXT_ID`, `ENERGY_METER_IDS` v `ha_ws.py` alebo pole `elektrina` v profile),
+cenníky `TARIFF` v `ha_cost.py` (cenník SSE/SSD na Slovensku) a adresa ESP (`ESP_URL` v `config.env`).
+
+## Iné tepelné čerpadlo / vlastný dom
+
+Aplikáciu možno nasadiť aj na iné Samsung EHS (Mono/Split, iný výkon, iné izby, podlahové kúrenie) bez úprav kódu:
+
+1. **ESPHome most** – použi [`esphome/samsung-ehs.yaml`](esphome/samsung-ehs.yaml) (názvy entít sú rovnaké ako v predvolenom
+   profile; zapojenie a nahratie popisuje [`esphome/README.md`](esphome/README.md)). Čísla niektorých NASA správ treba doplniť
+   podľa modelu (riadky `TODO`).
+2. **Profil** – v Nastaveniach → **Zariadenie a dom** (len správca) prejdi 4 krokmi: zariadenie, entity ESP, izby, mantinely.
+   Sprievodca načíta entity z ESP a teplotné senzory z HA a navrhne priradenie. Po uložení reštartuj služby.
+   Súbor `profil.json` môžeš upraviť aj ručne – vzor je [`profil.example.json`](profil.example.json), popis položiek
+   v [docs/PROFIL.md](docs/PROFIL.md). Bez `profil.json` platí pôvodná inštalácia (Samsung AE120JXEDGH, radiátory, 7 izieb).
+3. **Model zariadenia** – v `modely/` sú tabuľky výkonu a príkonu (Maximum Heating Capacity, Peak) z dokumentácie výrobcu
+   pre Samsung EHS Split `AE040/060/090/120/140/160JXED*H` (R410A). Overený na reálnom zariadení je len `AE120JXEDGH`,
+   ostatné majú `"overene": false` a presný zdroj v poli `zdroj`. Pre model bez tabuľky COP funguje, ak je k dispozícii
+   prietok zo senzora alebo z konfigurácie (`STATS_FLOW_LPM`); inak sa tepelný výkon a COP nezobrazia.
+4. **Mantinely** – predvolené hranice agenta sa prispôsobia typu kúrenia (radiátory / podlahové / kombinované) a profil ich
+   môže len zúžiť v rámci pevných absolútnych hraníc.
+
+Funkcie, ktoré pre tvoju inštaláciu nie sú k dispozícii (TÚV, Home Assistant, agent bez kľúča OpenRouter, spotreba domu,
+COP bez tabuľky), sa v aplikácii skryjú namiesto chýb.
 
 ## Upozornenie
 

@@ -563,6 +563,41 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
 @media (max-width:640px){.daybar{position:static}.themes button{width:28px}}
 @media (max-width:560px){.abnum{font-size:56px}.frow2{grid-template-columns:1fr}.pad,.hero-main{padding:20px 18px}.daybar{padding:14px 18px}.scroll{margin:0 -18px;padding:0 18px}.big{font-size:72px}.daytitle{font-size:21px}.sys span:last-child{display:none}.gate .panel{padding:26px 20px}}
 @media (max-width:480px){.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}}
+/* sprievodca profilom (Nastavenia -> Zariadenie a dom) a vypnuté funkcie */
+.fn-off{display:none!important}
+.pw{gap:16px;margin-top:6px}
+.pwstep{border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
+.pwstep>h4{margin:0 0 6px;font:500 15.5px/1.3 var(--f-display);display:flex;align-items:center;gap:10px}
+.pwn{display:inline-grid;place-items:center;flex:none;width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--copper-2),var(--copper));color:var(--on-copper);font:600 13px var(--f-body)}
+.pwgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:0 12px}
+.pwgrid>.form{min-width:0}
+.pwrow{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:9px 0;border-top:1px solid var(--line)}
+.pwrow>*{min-width:0}
+.pwrow .pwl{font-size:13px;font-weight:600;color:var(--ink-2);overflow-wrap:anywhere}
+.pwrow select{text-overflow:ellipsis}
+.pwrow .pwlive{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+@media (min-width:760px){.pwrow{grid-template-columns:minmax(170px,.8fr) minmax(0,1.7fr) minmax(70px,.4fr);align-items:center;gap:10px}}
+.pwreq{color:var(--crit-ink);margin-left:3px;font-weight:700}
+.pwroom{border-top:1px solid var(--line);padding:12px 0;display:grid;gap:6px;min-width:0}
+.pwroomhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.pwref{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--ink);margin:0}
+.pwref input{accent-color:var(--copper);width:17px;height:17px;margin:0}
+.pwbtns{display:flex;gap:6px;flex-wrap:wrap}
+.pwchips{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.pwchip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line-2);border-radius:999px;padding:2px 3px 2px 10px;font:12.5px ui-monospace,Consolas,monospace;max-width:100%;min-width:0}
+.pwchip>span{overflow-wrap:anywhere;min-width:0}
+.pwchip button{border:0;background:transparent;color:var(--ink-2);cursor:pointer;font:16px/1 var(--f-body);padding:2px 7px;border-radius:999px}
+.pwchip button:hover{background:var(--line);color:var(--ink)}
+.pwlim{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:9px 0;border-top:1px solid var(--line)}
+.pwlim .pwlf{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,92px),1fr));gap:0 8px}
+.pwlim .pwlf .form{min-width:0}
+.pwlim .pwl{font-size:13px;font-weight:600;color:var(--ink-2)}
+.pwlim .pwhint{font-size:12.5px;color:var(--mut)}
+.pwlim label{font-size:11.5px!important;margin-top:2px!important}
+.pw input.bad,.pw select.bad{border-color:var(--crit-ink)!important}
+.pwfe{color:var(--crit-ink);font-size:12.5px}
+.pwerr ul{margin:6px 0 0;padding-left:20px}
+.pwerr{overflow-wrap:anywhere}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important;animation:none!important}}
 </style>
 </head>
@@ -606,7 +641,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
   </section>
   <div class="hero">
     <section class="panel hero-main">
-      <p class="eyebrow">Detská izba · riadiaca miestnosť</p>
+      <p class="eyebrow" id="eyebrow">Detská izba · riadiaca miestnosť</p>
       <div class="reading">
         <div class="big" id="big">–<sup>°C</sup></div>
         <div class="reading-side">
@@ -646,6 +681,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
   <div class="two">
     <section class="panel pad chat" id="chatpanel">
       <div class="head"><h2><span class="adm">Správy agentovi</span><span class="usr">Agent</span></h2><span class="sub adm">Napíš, čo si spravil ručne, alebo sa opýtaj</span><span class="sub usr">Napíš, akú teplotu chceš (napr. ‚v detskej chcem 23‘), alebo sa opýtaj.</span></div>
+      <div id="agentoff" class="callout warn fn-off">Agent je vypnutý – vlož kľúč OpenRouter (Nastavenia → Agent).</div>
       <div class="thread" id="thread" aria-live="polite"></div>
       <form id="chatform" class="chatbox">
         <textarea id="chattext" rows="2" maxlength="2000" placeholder="Napríklad: ubral som na spätnom ventile v obývačke o štvrť otáčky" aria-label="Správa agentovi"></textarea>
@@ -672,7 +708,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
             <div class="form"><label for="ivkind">Typ</label>
               <select id="ivkind"><option value="ventil">Ventil</option><option value="krivka">Krivka</option><option value="nastavenie">Nastavenie</option><option value="vetranie">Vetranie</option><option value="ine">Iné</option></select></div>
             <div class="form"><label for="ivroom">Izba</label>
-              <select id="ivroom"><option value="">Žiadna / celý dom</option><option value="detska">Detská</option><option value="jedalen">Jedáleň</option><option value="kuchyna">Kuchyňa</option><option value="obyvacka">Obývačka</option><option value="spalna">Spálňa</option><option value="pracovna">Pracovňa</option><option value="kupelna">Kúpeľňa</option></select></div>
+              <select id="ivroom"><option value="">Žiadna / celý dom</option></select></div>
           </div>
           <label for="ivts">Kedy</label>
           <input type="datetime-local" id="ivts">
@@ -855,7 +891,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
       </div>
     </div>
     <div id="abidle" hidden>
-      <p class="sub" style="margin:0 0 8px;max-width:760px">Zmeria, koľko energie ušetrí regulácia podľa detskej izby; dni A (s reguláciou) a B (bez nej) sa striedajú.</p>
+      <p class="sub" style="margin:0 0 8px;max-width:760px">Zmeria, koľko energie ušetrí regulácia podľa <span id="abref">detskej izby</span>; dni A (s reguláciou) a B (bez nej) sa striedajú.</p>
       <details style="margin:0 0 14px"><summary>Ako to funguje</summary><p class="sub" style="margin:8px 0 0;max-width:760px">V dňoch A beží regulácia podľa izby ako obvykle, v dňoch B je vypnutá a čerpadlo ide len podľa ekvitermickej krivky. Počas testu agent nič nemení a ostáva ochrana: keď je v detskej príliš teplo alebo zima, alebo čerpadlo hlási chybu, deň B sa preruší a regulácia sa vráti. V dňoch B môže byť v izbách o niečo teplejšie alebo chladnejšie. Test začne o najbližšej polnoci.</p></details>
       <div class="form" style="max-width:320px"><label for="ablen" style="margin-top:0">Dĺžka testu</label>
         <select id="ablen"><option value="6">6 dní</option><option value="8">8 dní</option><option value="10" selected>10 dní (odporúčané)</option><option value="14">14 dní</option></select></div>
@@ -1016,9 +1052,57 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
       </form>
     </section>
 
+        <section class="panel pad sgroup wide" id="profsettings">
+      <h3>Zariadenie a dom</h3>
+      <p class="sub">Sprievodca nastavením tvojho tepelného čerpadla Samsung EHS, entít z ESP modulu, izieb a mantinelov agenta. Zmeny sa prejavia až po reštarte služieb.</p>
+      <div class="hastat"><span class="dot grey" id="pwdot"></span><span id="pwstat">načítavam…</span></div>
+      <form id="pfform" class="form pw" autocomplete="off" novalidate>
+        <div class="pwstep" id="pwstep1">
+          <h4><span class="pwn">1</span>Zariadenie</h4>
+          <div class="pwgrid">
+            <div class="form"><label for="pwmodel">Model</label><select id="pwmodel" data-pw="z:modelsel"></select></div>
+            <div class="form" id="pwmodelidw"><label for="pwmodelid">Označenie modelu (voliteľné)</label><input type="text" id="pwmodelid" data-pw="z:model" data-path="zariadenie.model" maxlength="40" spellcheck="false" autocapitalize="off"></div>
+            <div class="form"><label for="pwnazov">Názov zariadenia</label><input type="text" class="plain" id="pwnazov" data-pw="z:nazov" data-path="zariadenie.nazov" maxlength="80"></div>
+            <div class="form"><label for="pwtyp">Typ jednotky</label><select id="pwtyp" data-pw="z:typ" data-path="zariadenie.typ"></select></div>
+            <div class="form"><label for="pwvykon">Výkon (kW)</label><input type="number" id="pwvykon" data-pw="z:vykon_kw" data-path="zariadenie.vykon_kw" min="2" max="30" step="0.5" inputmode="decimal"></div>
+            <div class="form"><label for="pwfazy">Fázy</label><select id="pwfazy" data-pw="z:fazy" data-path="zariadenie.fazy"><option value="1">1 fáza</option><option value="3">3 fázy</option></select></div>
+            <div class="form"><label for="pwkurenie">Typ kúrenia</label><select id="pwkurenie" data-pw="z:kurenie" data-path="zariadenie.kurenie"></select></div>
+            <div class="form"><label for="pwchladivo">Chladivo</label><input type="text" class="plain" id="pwchladivo" data-pw="z:chladivo" data-path="zariadenie.chladivo" maxlength="80"></div>
+          </div>
+          <div class="check"><input type="checkbox" id="pwtuv" data-pw="z:tuv"><label for="pwtuv">Čerpadlo ohrieva aj teplú vodu (TÚV)</label></div>
+          <p class="sub" id="pwmodelnote" style="margin:8px 0 0"></p>
+        </div>
+        <div class="pwstep" id="pwstep2">
+          <h4><span class="pwn">2</span>Entity z ESP</h4>
+          <p class="sub" style="margin:0 0 6px">Ku každej veličine vyber entitu z ESP modulu. Povinné sú označené <span class="pwreq">*</span>, ostatné môžeš nechať nepoužité.</p>
+          <div class="btnrow" style="margin-top:6px"><button type="button" class="btn" data-act="esp-load">Načítať entity z ESP</button><button type="button" class="btn" data-act="esp-apply">Použiť automatický návrh</button><span id="pwespmsg" class="sub" role="status"></span></div>
+          <div id="pwesp"></div>
+        </div>
+        <div class="pwstep" id="pwstep3">
+          <h4><span class="pwn">3</span>Izby</h4>
+          <p class="sub" style="margin:0 0 6px">Referenčná izba je jedna: podľa nej firmvér čerpadla posúva krivku. Pri ostatných izbách sleduje agent zadané minimum.</p>
+          <div id="pwrooms"></div>
+          <datalist id="pwhalist"></datalist>
+          <div class="btnrow"><button type="button" class="btn" data-act="room-add">Pridať izbu</button><button type="button" class="btn" data-act="room-esp" id="pwroomesp" hidden>Doplniť izby z ESP</button><button type="button" class="btn" data-act="ha-load">Načítať senzory z Home Assistanta</button><span id="pwhamsg" class="sub" role="status"></span></div>
+        </div>
+        <div class="pwstep" id="pwstep4">
+          <h4><span class="pwn">4</span>Mantinely agenta</h4>
+          <p class="sub" style="margin:0 0 6px" id="pwlimnote"></p>
+          <div id="pwlim"></div>
+          <div class="btnrow"><button type="button" class="btn" data-act="lim-preset">Predvolené podľa typu kúrenia</button></div>
+        </div>
+        <div id="pwerr" class="callout warn pwerr" role="alert" hidden></div>
+        <div class="btnrow"><button class="btn primary" type="submit" id="pwsave">Uložiť</button><button class="btn danger" type="button" id="pwreset">Obnoviť predvolené</button><span id="pfmsg" class="sub" role="status"></span></div>
+        <div id="pwrestart" class="callout note" hidden>
+          <b>Profil je uložený.</b> Zmeny sa prejavia až po reštarte služieb (agent, zberač a web). Web sa na chvíľu odmlčí, potom sa stránka obnoví sama.
+          <div class="btnrow"><button type="button" class="btn primary" id="pwrestartbtn">Reštartovať služby</button><span id="pwrestartmsg" class="sub" role="status"></span></div>
+        </div>
+      </form>
+    </section>
+
     <section class="panel pad sgroup">
       <h3>Želané teploty izieb</h3>
-      <p class="sub">Najnižšia teplota, pod ktorú agent nechce nechať izbu klesnúť. Detská sa riadi cieľom v čerpadle.</p>
+      <p class="sub">Najnižšia teplota, pod ktorú agent nechce nechať izbu klesnúť. <span id="tgrefnote">Detská</span> sa riadi cieľom v čerpadle.</p>
       <form id="tgform" class="form" autocomplete="off">
         <div class="tgrid" id="tgfields"><div class="empty">Načítavam…</div></div>
         <div class="btnrow"><button class="btn primary" type="submit" id="tgsave">Uložiť teploty</button><span id="tgmsg" class="sub" role="status"></span></div>
@@ -1077,7 +1161,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
       <h3>Čo agent smie meniť</h3>
       <div id="limits" class="sub" style="display:grid;gap:4px"></div>
       <details style="margin-top:10px"><summary>Ako to funguje</summary>
-        <p class="sub">V režime „Len radí“ agent každú hodinu vyhodnotí stav a navrhne zmeny, ale nič nezapíše. V režime „Riadi“ povolené zmeny aj zapíše do čerpadla. Minútovú reguláciu podľa detskej izby robí vždy firmvér čerpadla.</p></details>
+        <p class="sub">V režime „Len radí“ agent každú hodinu vyhodnotí stav a navrhne zmeny, ale nič nezapíše. V režime „Riadi“ povolené zmeny aj zapíše do čerpadla. Minútovú reguláciu podľa <span id="setref">detskej izby</span> robí vždy firmvér čerpadla.</p></details>
     </section>
     </div>
   </div>
@@ -1159,7 +1243,7 @@ function renderBadges(s) {
   $("#bd-analyzy").hidden = !abActive(s.abtest);
 }
 function showTab(id) {
-  if (!TABS.includes(id) || (isUser() && !USER_TABS.includes(id))) id = "prehlad";
+  if (!TABS.includes(id) || (isUser() && !USER_TABS.includes(id)) || OFF_TABS.has(id)) id = "prehlad";
   const changed = id !== curTab; if (changed && curTab === "statistiky" && window.StatsUI) window.StatsUI.hide();
   if (changed && curTab === "izby") closeRoom(true); if (changed && curTab === "tuv") closeTuv(true); curTab = id;
   for (const t of TABS) { $("#tab-" + t).hidden = t !== id; $("#tabl-" + t).setAttribute("aria-selected", t === id ? "true" : "false"); }
@@ -1177,7 +1261,7 @@ function activate(id) {
   else if (id === "statistiky") loadStatsUI();
   else if (id === "cidla") { sRender(sSub, true); loadContacts(first).catch(() => {}); loadTemps(first).catch(() => {}); }
   else if (id === "analyzy") { loadAbtest().catch(() => {}); if (first) { loadReports().catch(() => {}); loadHistory().catch(() => {}); } }
-  else if (id === "nastavenia") { if (!first) pushRefresh().catch(() => {}); loadTargets().catch(() => {}); loadUsers().catch(() => {}); loadMqtt().catch(() => {}); if (!modelList.length) loadModels().catch(() => {}); }
+  else if (id === "nastavenia") { if (!first) pushRefresh().catch(() => {}); loadTargets().catch(() => {}); loadProfil(false).catch(() => {}); loadUsers().catch(() => {}); loadMqtt().catch(() => {}); if (!modelList.length) loadModels().catch(() => {}); }
 }
 /* záložka Štatistiky: stats_ui.css a stats_ui.js sa načítajú lenivo pri prvom otvorení, potom StatsUI.show() */
 let statsLoad = null;
@@ -1603,6 +1687,49 @@ function runHtml(r, full, quote) {
   return h + "</div>";
 }
 
+/* profil inštalácie: izby, referenčná izba a dostupné funkcie prichádzajú v status.profil_info (bez neho platia pôvodné hodnoty) */
+let PI = null, profSig = "";
+const OFF_TABS = new Set();
+const tuvOn = () => !(PI && PI.funkcie && PI.funkcie.tuv === false);
+const refName = () => RN[RKEYS[0]] || "Referenčná";
+const refGen = () => RKEYS[0] === "detska" ? "detskej" : "izbe „" + refName() + "“";
+const refIzba = () => RKEYS[0] === "detska" ? "detskej izbe" : "izbe „" + refName() + "“";
+const dayRooms = () => { const o = RKEYS.slice(1), pref = ["jedalen", "kuchyna", "spalna"].filter(k => o.includes(k)); return pref.concat(o.filter(k => !pref.includes(k))).slice(0, 3); };
+function applyFunkcie(fn) {
+  fn = fn || {}; OFF_TABS.clear();
+  if (fn.tuv === false) OFF_TABS.add("tuv");
+  if (fn.spotreba_domu === false) OFF_TABS.add("spotreba");
+  for (const t of ["tuv", "spotreba"]) { const off = OFF_TABS.has(t), a = $("#tabl-" + t), p = $("#tab-" + t);
+    if (a) a.classList.toggle("fn-off", off); if (p && off) p.hidden = true; }
+  const aoff = fn.agent_ai === false;
+  $("#agentoff").classList.toggle("fn-off", !aoff); $("#chatform").classList.toggle("fn-off", aoff); $("#chips").classList.toggle("fn-off", aoff);
+  if (curTab && OFF_TABS.has(curTab)) showTab("prehlad");
+}
+function applyProfil(pi) {
+  if (!pi || !Array.isArray(pi.izby) || !pi.izby.length) return;
+  PI = pi;
+  const sig = JSON.stringify([pi.izby, pi.ciel_rozsah, pi.funkcie, pi.zariadenie, pi.tuv_entity || null]);
+  if (sig === profSig) return; profSig = sig;
+  for (const k of Object.keys(RN)) delete RN[k];
+  RKEYS.length = 0; ROOMS.length = 0;
+  for (const r of pi.izby) { RN[r.kluc] = r.nazov; RKEYS.push(r.kluc); ROOMS.push([r.esp || "", r.nazov]); }
+  DET_KEY = ROOMS[0][0];
+  if (Array.isArray(pi.ciel_rozsah) && pi.ciel_rozsah.length === 2 && pi.ciel_rozsah[1] > pi.ciel_rozsah[0]) {
+    RT_MIN = Number(pi.ciel_rozsah[0]); RT_MAX = Number(pi.ciel_rozsah[1]); DL.DEG = Math.min(72, 324 / (RT_MAX - RT_MIN));
+    const d = $("#dial"); if (d) { d.setAttribute("aria-valuemin", String(RT_MIN)); d.setAttribute("aria-valuemax", String(RT_MAX)); }
+  }
+  if (pi.tuv_entity) { TUV_V = pi.tuv_entity.teplota || TUV_V; TUV_T = pi.tuv_entity.ciel || TUV_T; }
+  CH[0].ser = RKEYS.slice(0, 6).map((k, i) => [k, RN[k], "--s" + (i + 1)]);
+  buildCols();
+  const set = (sel, txt) => { const e = $(sel); if (e) e.textContent = txt; };
+  set("#eyebrow", refName() + (RKEYS[0] === "detska" ? " izba" : "") + " · riadiaca miestnosť");
+  set("#tgrefnote", refName()); set("#abref", RKEYS[0] === "detska" ? "detskej izby" : "izby „" + refName() + "“"); set("#setref", RKEYS[0] === "detska" ? "detskej izby" : "izby „" + refName() + "“");
+  const dl = $("#dial"); if (dl) dl.setAttribute("aria-label", "Cieľová teplota " + (RKEYS[0] === "detska" ? "detskej izby" : "izby „" + refName() + "“"));
+  const iv = $("#ivroom"); if (iv) { const cur = iv.value; iv.innerHTML = `<option value="">Žiadna / celý dom</option>` + RKEYS.map(k => `<option value="${esc(k)}">${esc(RN[k])}</option>`).join(""); iv.value = RKEYS.includes(cur) ? cur : ""; }
+  bigHtml = ""; tuvHtml = "";
+  applyFunkcie(pi.funkcie);
+}
+
 /* teplotná stupnica izieb */
 const ROOMS = [["Sledovaná teplota (Detská izba)", "Detská"], ["Izba Jedáleň", "Jedáleň"], ["Izba Kuchyňa", "Kuchyňa"], ["Izba Obývačka", "Obývačka"], ["Izba Spálňa", "Spálňa"], ["Izba Pracovňa", "Pracovňa"], ["Izba Kúpeľňa", "Kúpeľňa"]];
 function drawScale() {
@@ -1623,7 +1750,7 @@ function drawScale() {
   for (let v = lo; v <= hi; v++) s += `<line x1="${x(v)}" x2="${x(v)}" y1="${yAxis + 5}" y2="${yAxis + 10}" stroke="var(--line-2)"/><text x="${x(v)}" y="${yAxis + 24}" text-anchor="middle">${v}°</text>`;
   if (ciel != null) s += `<line x1="${x(ciel)}" x2="${x(ciel)}" y1="${yAxis - 14}" y2="${yAxis + 14}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"/><text x="${x(ciel)}" y="${yAxis + 42}" text-anchor="middle" class="lab">cieľ ${f(ciel)}°</text>`;
   pts.forEach(p => { const ly = yAxis - 22 - p.r * 19, anchor = p.x < 50 ? "start" : p.x > W - 50 ? "end" : "middle";
-    s += `<line x1="${p.x}" x2="${p.x}" y1="${ly + 4}" y2="${yAxis - 7}" stroke="var(--line-2)"/><circle cx="${p.x}" cy="${yAxis}" r="6" fill="var(--panel)" stroke="${p.l === "Detská" ? "var(--copper)" : "var(--ink)"}" stroke-width="2.5"/>` +
+    s += `<line x1="${p.x}" x2="${p.x}" y1="${ly + 4}" y2="${yAxis - 7}" stroke="var(--line-2)"/><circle cx="${p.x}" cy="${yAxis}" r="6" fill="var(--panel)" stroke="${p.l === refName() ? "var(--copper)" : "var(--ink)"}" stroke-width="2.5"/>` +
       `<text x="${p.x}" y="${ly}" text-anchor="${anchor}" class="lab">${p.l} <tspan class="val">${f(p.v)}</tspan></text>` +
       (wopen.has(p.l) ? `<g transform="translate(${p.x + 9},${yAxis - 16})"><title>Otvorené okno</title><rect class="winico" x="0" y="0" width="11" height="11" rx="1.5"/><path class="winico" d="M5.5 0V11M0 5.5H11"/></g>` : ""); });
   box.innerHTML = `<svg height="${H}" viewBox="0 0 ${W} ${H}" role="img">${s}</svg>`;
@@ -1631,7 +1758,7 @@ function drawScale() {
 
 /* hlavný údaj (riadiaca izba) a stupnica: spoločné pre všetky roly */
 function renderHero(s) {
-  const g = n => (s.current || {})[n], det = g("Sledovaná teplota (Detská izba)"), ciel = g("Aktuálna cieľová teplota izby");
+  const g = n => (s.current || {})[n], det = g(DET_KEY), ciel = g("Aktuálna cieľová teplota izby");
   $("#big").innerHTML = `${f(det)}<sup>°C</sup>`;
   $("#delta").textContent = det != null && ciel != null ? (Math.abs(det - ciel) < .05 ? "presne na cieli " : (det > ciel ? "+" : "−") + f(Math.abs(det - ciel)) + " °C voči cieľu ") + f(ciel) + " °C" : "cieľ –";
   $("#out").textContent = f(g("Vonkajšia teplota")) + " °C";
@@ -1649,7 +1776,7 @@ function renderMark(det, ciel) {
   const has = det != null && !Number.isNaN(Number(det)), txt = has ? f(det) : "–", st = markState(det, ciel);
   const el = $("#marktxt"), mk = $("#mark");
   if (el) { el.textContent = txt; el.className = "mt" + (st === "none" ? "" : " t-" + st); }
-  if (mk) { const t = "Detská " + (has ? f(det) + " °C" : "– °C") + (ciel != null && !Number.isNaN(Number(ciel)) ? ", cieľ " + f(ciel) + " °C" : ""); mk.setAttribute("aria-label", t); mk.title = t; }
+  if (mk) { const t = refName() + " " + (has ? f(det) + " °C" : "– °C") + (ciel != null && !Number.isNaN(Number(ciel)) ? ", cieľ " + f(ciel) + " °C" : ""); mk.setAttribute("aria-label", t); mk.title = t; }
   drawFavicon(txt, st);
   if (!has || Number(det) < 0) clearBadge(); else setBadge(Math.round(Number(det)));
 }
@@ -1766,7 +1893,7 @@ document.addEventListener("click", async e => {
     catch (x) { PUSH.busy = false; if (!x.auth) pushSay("Server neodpovedá. Skús to znova.", false); } }
 });
 /* karta Izby: všetky izby, riadiaca (Detská) prvá; admin pri nej nastavuje cieľovú teplotu */
-const RT_MIN = 20, RT_MAX = 24.5, RT_KEY = "Aktuálna cieľová teplota izby";
+let RT_MIN = 20, RT_MAX = 24.5; const RT_KEY = "Aktuálna cieľová teplota izby";
 let roomDraft = null, roomMsg = null, roomBusy = false;
 const WIN_SVG = `<svg viewBox="0 0 14 14" aria-hidden="true"><rect class="winico" x="1.5" y="1.5" width="11" height="11" rx="1.5"/><path class="winico" d="M7 1.5V12.5M1.5 7H12.5"/></svg>`;
 function renderRooms(s) {
@@ -1805,7 +1932,7 @@ function renderBigRooms(s) {
   box.innerHTML = html;
   if (fk) { const n = box.querySelector(`[data-k="${fk}"]`); if (n) n.focus({preventScroll: true}); }
 }
-const TUV_V = "Teplota TÚV (Bojler)", TUV_T = "Cieľová teplota TÚV";
+let TUV_V = "Teplota TÚV (Bojler)", TUV_T = "Cieľová teplota TÚV";
 function tuvInner(s, chev) {
   const c = s.current || {}, v = c[TUV_V], tg = c[TUV_T];
   return bigInner("Bojler", false, false, v, tg != null ? "cieľ " + f(tg) + " °C" : "cieľ bez údaja", chev);
@@ -1952,14 +2079,14 @@ function openRoom(key) {
   roomDetail = key; $("#roomlist").hidden = true; $("#roomdetail").hidden = false; vkSync(); $("#rdtitle").textContent = ROOMS[i][1];
   const box = $("#rdctl"), user = isUser(), cur = () => num(((statusData || {}).current || {})[RT_KEY]);
   for (const p of ["rd"]) delete STP[p];
-  if (key === "detska") {
-    stpInit("rd", {min: RT_MIN, max: RT_MAX, step: .5, base: cur, hint: user ? "Naraz najviac ±1,0 °C a raz za 30 minút." : "Platí 20 až 24,5 °C po 0,5 °C.",
+  if (key === RKEYS[0]) {
+    stpInit("rd", {min: RT_MIN, max: RT_MAX, step: .5, base: cur, hint: user ? "Naraz najviac ±1,0 °C a raz za 30 minút." : "Platí " + String(RT_MIN).replace(".", ",") + " až " + String(RT_MAX).replace(".", ",") + " °C po 0,5 °C.",
       save: async v => { if (user) { const r = await api("api/user_target", {value: v}); return r.text ? {ok: !!r.ok, text: r.text} : {ok: false, text: r.error || "Zmenu sa nepodarilo vykonať."}; }
         const r = await api("api/room_target", {value: v}); return r.error ? {ok: false, text: r.error} : {ok: true, text: "Cieľová teplota nastavená na " + f(r.value != null ? r.value : v) + " °C." + (r.note ? " " + r.note : "")}; }});
     box.innerHTML = `<h3 class="dh">Cieľová teplota</h3>` + stpHtml("rd", "Nastaviť");
-  } else if (user) box.innerHTML = `<h3 class="dh">Ovládanie</h3><p class="sub" style="margin:0">Teplotu tejto izby neriadi čerpadlo priamo – ak je chladno, zvýš cieľ v detskej izbe (záložka Prehľad).</p>`;
+  } else if (user) box.innerHTML = `<h3 class="dh">Ovládanie</h3><p class="sub" style="margin:0">Teplotu tejto izby neriadi čerpadlo priamo – ak je chladno, zvýš cieľ v ${esc(refIzba())} (záložka Prehľad).</p>`;
   else {
-    stpInit("rd", {min: 15, max: 26, step: .5, base: () => { const t = (statusData || {}).targets; return num(t && t[key] ? t[key].min : null); }, hint: "Toto minimum sleduje agent; čerpadlo regulujú ventily a detská izba.",
+    stpInit("rd", {min: 15, max: 26, step: .5, base: () => { const t = (statusData || {}).targets; return num(t && t[key] ? t[key].min : null); }, hint: "Toto minimum sleduje agent; čerpadlo regulujú ventily a referenčná izba (" + RN[RKEYS[0]] + ").",
       save: async v => { const r = await api("api/targets", {targets: {[key]: {min: v}}}); return r.error ? {ok: false, text: r.error} : {ok: true, text: "Minimum uložené: " + f(v) + " °C. Platí od najbližšieho behu agenta."}; }});
     box.innerHTML = `<h3 class="dh">Želané minimum izby</h3>` + stpHtml("rd", "Uložiť");
   }
@@ -2032,7 +2159,7 @@ $("#roomtarget").addEventListener("click", guard(async e => { const b = e.target
   if (roomMsg && roomMsg.ok) { try { await loadStatus(); } catch (x) {} touchDay(); } }, null));
 /* rola user: otočný ovládač cieľa. Celý kruh 360° = 5 °C (20,0 hore, po smere hodín; 24,5 je na 324°), bežec sleduje prst plynule,
    zobrazená hodnota sa zaokrúhľuje na 0,5 °C; zmena najviac ±1,0 °C voči aktuálnemu cieľu, potvrdenie tlačidlom */
-const DET_KEY = "Sledovaná teplota (Detská izba)";
+let DET_KEY = "Sledovaná teplota (Detská izba)";
 const DL = {R: 118, CX: 150, CY: 150, STEP: 1, DEG: 72};
 const dial = {draft: null, drag: false, busy: false, msg: null, pos: null, raw: 0, last: 0, snap: null, atStop: false, raf: 0, anim: 0, aLo: 0, aHi: 0};
 const dAng = v => (v - RT_MIN) * DL.DEG;
@@ -2156,6 +2283,7 @@ async function loadStatus() {
   if (!authed || !s0 || s0.error) return;
   const s = statusData = s0;
   applyRole(s.role, s.email);
+  applyProfil(s.profil_info);
   renderBigRooms(s); renderTuv(s);
   if (isUser()) { renderHero(s); renderRooms(s); renderUserLast(s); updateDial(); if (s.first_day) $("#date").min = s.first_day; return; }
   renderAlerts(s.alerts);
@@ -2196,7 +2324,7 @@ async function loadStatus() {
   $("#stats").innerHTML = [stat("Voda · výstup", f(g("Výstupná teplota vody (Tw2)")), "°C", "cieľ " + f(g("Cieľová ekvitermická voda (WL)")) + " °C"),
     stat("Delta T", f(g("Delta T vykurovacej vody")), "°C", "bežne 4–5,5 °C"), stat("Kompresor", f(g("Frekvencia kompresora"), 0), "Hz", "obeh. čerpadlo " + f(g("Otáčky obehového čerpadla (PWM)"), 0) + " %"),
     stat("Krivka", f(g("FSV 2031 WL2 voda pri najchladnejšom"), 0) + " / " + f(g("FSV 2032 WL2 voda pri najteplejšom"), 0), "°C", "posun " + f(g("Posun ekvitermickej krivky")) + " °C"),
-    stat("Bojler", f(g("Teplota TÚV (Bojler)")), "°C"),
+    ...(tuvOn() ? [stat("Bojler", f(g(TUV_V)), "°C")] : []),
     stat("Spotreba dnes", f(cal && lv.kwh_day != null ? lv.kwh_day : g("Denná spotreba TČ"), 1), "kWh", cal ? "kalibrované podľa elektromera" : "odhad z prúdu"),
     ...(lv ? [stat("COP teraz", f(lv.cop_now, 2), "", "denný COP " + f(lv.cop_day, 2) + " · tepelný výkon " + f(lv.p_th_kw, 1) + " kW")] : []),
     stat("Chybový kód", err ? `<span class="flag">${f(err, 0)}</span>` : "0", "", err ? "skontroluj ovládač" : "bez chyby")].join("");
@@ -2274,9 +2402,11 @@ function hover(i, cx, cy) {
   tip.style.top = Math.max(8, Math.min(window.innerHeight - hh - 8, cy - hh / 2)) + "px";
 }
 
-const COLS = [["vonku", "Vonku"], ["detska", "Detská"], ["jedalen", "Jedáleň"], ["kuchyna", "Kuchyňa"], ["obyvacka", "Obývačka"], ["spalna", "Spálňa"],
-  ["pracovna", "Pracovňa"], ["kupelna", "Kúpeľňa"], ["wl", "Voda cieľ"], ["tw2", "Výstup"], ["dt_beh", "ΔT"], ["beh", "Beh %", 0], ["starty", "Štarty", 0],
+const COLS_TAIL = [["wl", "Voda cieľ"], ["tw2", "Výstup"], ["dt_beh", "ΔT"], ["beh", "Beh %", 0], ["starty", "Štarty", 0],
   ["f_avg", "Hz", 0], ["posun", "Posun"], ["kwh", "kWh", 2], ["bojler", "Bojler"], ["okna_min", "Okná", 0]];
+const COLS = [];
+function buildCols() { COLS.length = 0; COLS.push(["vonku", "Vonku"], ...RKEYS.map(k => [k, RN[k]]), ...COLS_TAIL.filter(c => c[0] !== "bojler" || tuvOn())); }
+buildCols();
 function renderHours() {
   const d = dayData;
   $("#hours thead").innerHTML = "<tr><th>Hodina</th>" + COLS.map(c => `<th>${c[1]}</th>`).join("") + `<th class="txt">Agent</th></tr>`;
@@ -2296,7 +2426,7 @@ function renderHours() {
       if (ivs.length) det += `<p class="h3" style="margin-top:18px">Zásahy</p>` + ivs.map(x => ivItem(x, false)).join("");
       const wl = (d.okna || []).filter(o => o.ts >= h.ts && o.ts < h.ts + 3600);
       if (wl.length || h.okna_min) det += `<p class="h3" style="margin-top:18px">Okná a dvere · ${f(h.okna_min, 0)} min otvorené</p>` + (wl.length ? wl.map(o => `<div class="ev"><time>${hm(o.ts)}</time><span class="k">${o.state === "on" ? "otvorené" : "zatvorené"}</span><span>${esc(o.group || "")} – ${esc(o.label)}</span></div>`).join("") : `<div class="sub">Otvorené už z predošlej hodiny.</div>`);
-      det += `<p class="h3" style="margin-top:18px">Rozsahy za hodinu</p><div class="sub">Vonku ${f(h.vonku_min)} až ${f(h.vonku_max)} °C · detská ${f(h.detska_min)} až ${f(h.detska_max)} °C · výstup vody ${f(h.tw2_min)} až ${f(h.tw2_max)} °C · príkon Ø ${f(h.prikon, 0)} W · obehové čerpadlo ${f(h.pwm, 0)} %</div>`;
+      det += `<p class="h3" style="margin-top:18px">Rozsahy za hodinu</p><div class="sub">Vonku ${f(h.vonku_min)} až ${f(h.vonku_max)} °C · ${esc(RN[RKEYS[0]].toLowerCase())} ${f(h[RKEYS[0] + "_min"])} až ${f(h[RKEYS[0] + "_max"])} °C · výstup vody ${f(h.tw2_min)} až ${f(h.tw2_max)} °C · príkon Ø ${f(h.prikon, 0)} W · obehové čerpadlo ${f(h.pwm, 0)} %</div>`;
       det += `<p class="h3" style="margin-top:18px">Udalosti (${evs.length})</p>` + (evs.length ? evs.map(e => `<div class="ev"><time>${hm(e.ts)}</time><span class="k">${esc(e.kind)}</span><span>${esc(e.entity || "")} ${esc(e.text || ((e.old ?? "") + " → " + (e.new ?? "")))}</span></div>`).join("") : `<div class="empty">Žiadne.</div>`);
       rows += `<tr class="det"><td colspan="${COLS.length + 2}">${det}</td></tr>`;
     }
@@ -2308,10 +2438,10 @@ function renderDay() {
   $("#daytitle").textContent = dt.toLocaleDateString("sk-SK", {weekday: "long", day: "numeric", month: "long", year: "numeric"});
   $("#daybadge").innerHTML = curDay === todayStr() ? `<span class="pill p-info">Dnes · prebieha</span>` : "";
   $("#date").value = curDay; $("#next").disabled = curDay >= todayStr(); $("#prev").disabled = !!(statusData?.first_day && curDay <= statusData.first_day);
-  const rel = v => v == null ? "" : f(v) + " °C voči detskej";
+  const rel = v => v == null ? "" : f(v) + " °C voči " + refGen();
   $("#daysum").innerHTML = s.hodin_s_datami ? [
-    stat("Vonku Ø", f(s.vonku), "°C", f(s.vonku_min) + " až " + f(s.vonku_max) + " °C"), stat("Detská Ø", f(s.detska), "°C", s.hod_pod_cielom + " h pod, " + s.hod_nad_cielom + " h nad cieľom"),
-    stat("Jedáleň Ø", f(s.jedalen), "°C", rel(s.rozdiel_jedalen)), stat("Kuchyňa Ø", f(s.kuchyna), "°C", rel(s.rozdiel_kuchyna)), stat("Spálňa Ø", f(s.spalna), "°C", rel(s.rozdiel_spalna)),
+    stat("Vonku Ø", f(s.vonku), "°C", f(s.vonku_min) + " až " + f(s.vonku_max) + " °C"), stat(RN[RKEYS[0]] + " Ø", f(s[RKEYS[0]]), "°C", s.hod_pod_cielom + " h pod, " + s.hod_nad_cielom + " h nad cieľom"),
+    ...dayRooms().map(k => stat(RN[k] + " Ø", f(s[k]), "°C", rel(s["rozdiel_" + k]))),
     stat("Spotreba", f(s.kwh, 1), "kWh", s.kwh_na_stupen != null ? f(s.kwh_na_stupen, 2) + " kWh na 1 °C" : "odhad z prúdu"), stat("Beh kompresora", f(s.beh, 0), "%", s.starty + " štartov"),
     stat("Delta T pri behu", f(s.dt_beh), "°C", s.hod_dt_vysoka ? s.hod_dt_vysoka + " h nad 6,5 °C" : "v norme"), stat("Krivka", f(s.fsv2031, 0) + " / " + f(s.fsv2032, 0), "°C", "posun Ø " + f(s.posun, 2) + " °C"),
     stat("Okná otvorené", s.okna_min == null ? "–" : f(s.okna_min, 0), "min", s.okna_min == null ? "bez dát zo senzorov" : "aspoň jedno otvorené"), stat("Zmeny agenta", s.zmeny_agenta, "", "chýb čerpadla: " + s.chyby)].join("") : `<div class="empty" style="padding:18px 0">Pre tento deň nie sú žiadne dáta.</div>`;
@@ -2337,7 +2467,7 @@ async function loadHistory() {
   $("#learn").innerHTML = L ? (L.summary ? `<div class="callout note" style="margin-bottom:16px;white-space:pre-wrap">${esc(L.summary)}</div>` : "") + `<ol class="lessons">${L.items.map(x => `<li><span>${esc(x)}</span></li>`).join("")}</ol>`
     : `<div class="empty">Zatiaľ žiadne poučenia. Agent si ich zapíše raz denne z uzavretých dní, hneď ako bude mať kľúč a nebude vypnutý.</div>` +
       (h.learn_error ? `<div class="callout warn" style="margin-top:12px">Posledný pokus o učenie zlyhal: ${esc(h.learn_error.error)}</div>` : "");
-  const C = [["vonku", "Vonku Ø"], ["detska", "Detská", 2], ["jedalen", "Jedáleň", 2], ["kuchyna", "Kuchyňa", 2], ["obyvacka", "Obývačka", 2], ["spalna", "Spálňa", 2], ["pracovna", "Pracovňa", 2],
+  const C = [["vonku", "Vonku Ø"], ...RKEYS.map(k => [k, RN[k], 2]),
     ["kwh", "kWh"], ["kwh_na_stupen", "kWh/°C", 2], ["beh", "Beh %", 0], ["starty", "Štarty", 0], ["dt_beh", "ΔT"], ["posun", "Posun Ø", 2]];
   $("#days thead").innerHTML = "<tr><th>Deň</th>" + C.map(c => `<th>${c[1]}</th>`).join("") + "<th>Pod / nad cieľom</th><th>Krivka</th></tr>";
   $("#days tbody").innerHTML = h.days.map(d => { const dd = d.date.slice(0, 10), dt = new Date(dd + "T12:00:00");
@@ -2462,6 +2592,251 @@ $("#notifytest").onclick = guard(async () => { const b = $("#notifytest"); b.dis
   try { const r = await api("api/notify_test", {}); say("#notifymsg", r.ok ? "Testovacie upozornenie odoslané." : "Odoslanie zlyhalo: " + (r.error || "neznáma chyba"), !!r.ok); }
   finally { b.disabled = false; } await loadStatus(); }, "#notifymsg");
 
+/* Zariadenie a dom: sprievodca profilom inštalácie (api/profil, api/profil/esp_entity, api/profil/ha_entity, api/restart) */
+const PW = {data: null, p: null, esp: null, ha: null, lim: {}, dirty: false, espLoading: false};
+const PW_REQ = ["vonku", "tw2", "tw1", "freq", "wl", "posun", "fsv2031", "fsv2032"];
+const PW_DEV = {vonku: "Vonkajšia teplota", sledovana: "Sledovaná teplota (referenčná izba)", ciel_akt: "Aktuálna cieľová teplota izby", posun: "Posun ekvitermickej krivky",
+  wl: "Cieľová voda krivky (WL)", tw2: "Výstupná voda (Tw2)", tw1: "Spiatočka (Tw1)", dt: "Delta T", freq: "Frekvencia kompresora", prikon: "Príkon čerpadla",
+  tuv: "Teplota TÚV (bojler)", tuv_ciel: "Cieľová teplota TÚV", pwm: "Otáčky obehového čerpadla (PWM)", chyba: "Chybový kód", kwh_den: "Denná spotreba",
+  flow: "Prietok vody", ventil: "3-cestný ventil (smer ohrevu)", odmrazovanie: "Odmrazovanie", termostat: "Termostat (požiadavka na teplo)", ciel_izby: "Cieľová izbová teplota (zápis)"};
+const PW_SET = {fsv2011: "FSV 2011 Vonku najchladnejšie", fsv2012: "FSV 2012 Vonku najteplejšie", fsv2021: "FSV 2021 WL1 voda pri najchladnejšom", fsv2022: "FSV 2022 WL1 voda pri najteplejšom",
+  fsv2031: "FSV 2031 WL2 voda pri najchladnejšom", fsv2032: "FSV 2032 WL2 voda pri najteplejšom", fsv4013: "FSV 4013 Vypnutie kúrenia nad vonk. teplotou",
+  max_posun: "Maximálny kladný posun krivky", max_posun_zaporny: "Maximálny posun krivky (záporný)", zosilnenie: "Zosilnenie posunu krivky"};
+const PW_KUR = {radiatory: "Radiátory", podlahove: "Podlahové kúrenie", kombinovane: "Radiátory aj podlaha"};
+const PW_JED = {split: "Split", mono: "Mono (monobloc)", hydrosplit: "Hydrosplit"};
+const PW_LIM = [["fsv2031", "FSV 2031 – voda pri najchladnejšom počasí"], ["fsv2032", "FSV 2032 – voda pri najteplejšom počasí"],
+  ["fsv4013", "FSV 4013 – vypnutie kúrenia nad vonkajšou teplotou"], ["max_posun", "Maximálny kladný posun krivky"]];
+const PW_LIMF = ["Min", "Max", "Najviac naraz", "Raz za (h)", "Zaokrúhlenie"];
+const pwNum = v => { const n = Number(String(v ?? "").trim().replace(",", ".")); return String(v ?? "").trim() === "" || !Number.isFinite(n) ? null : n; };
+const pwSlug = s => { let k = String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 21).replace(/_+$/, "");
+  return k && !/^[a-z]/.test(k) ? ("i_" + k).slice(0, 21) : k; };
+const pwEl = id => document.getElementById(id);
+function pwPreset(typ, k) { const v = PW.data && PW.data.predvolby && PW.data.predvolby[typ] ? PW.data.predvolby[typ][k] : null; return v ? v.slice() : null; }
+function pwInitLim() {
+  PW.lim = {}; const m = PW.p.mantinely || {};
+  for (const [k] of PW_LIM) { const own = Array.isArray(m[k]) ? m[k] : null; PW.lim[k] = {v: (own || pwPreset(PW.p.zariadenie.kurenie, k) || [0, 0, 1, 24, 1]).slice(), custom: !!own}; }
+  if (!Array.isArray(m.ciel_izby)) m.ciel_izby = [20, 24.5];
+  PW.p.mantinely = m;
+}
+function pwLive(name) {
+  if (!name || !PW.esp) return "";
+  const x = (PW.esp.entity || []).find(e => e.nazov === name);
+  if (!x || x.hodnota == null || x.hodnota === "") return "";
+  return typeof x.hodnota === "number" ? f(x.hodnota, Math.abs(x.hodnota) >= 100 ? 0 : 1) : String(x.hodnota);
+}
+function pwOpts(cur) {
+  const names = (PW.esp ? PW.esp.entity || [] : []).map(x => x.nazov), set = new Set(names);
+  const all = cur && !set.has(cur) ? [cur].concat(names) : names;
+  return `<option value="">— nepoužité —</option>` + all.map(n => `<option value="${esc(n)}"${n === cur ? " selected" : ""}>${esc(n)}${n === cur && PW.esp && !set.has(n) ? " (nie je v ESP)" : ""}</option>`).join("");
+}
+function pwRenderDevice() {
+  const z = PW.p.zariadenie, D = PW.data, known = D.modely.some(m => m.id === z.model);
+  pwEl("pwmodel").innerHTML = D.modely.map(m => `<option value="${esc(m.id)}"${m.id === z.model ? " selected" : ""}>${esc(m.nazov || m.id)}${m.vykon_kw ? " · " + esc(m.vykon_kw) + " kW" : ""}${m.overene ? "" : " (neoverené)"}</option>`).join("") +
+    `<option value="__iny"${known ? "" : " selected"}>Iný / neznámy model</option>`;
+  pwEl("pwmodelidw").hidden = known; pwEl("pwmodelid").value = known ? "" : (z.model || "");
+  pwEl("pwnazov").value = z.nazov || ""; pwEl("pwvykon").value = z.vykon_kw ?? ""; pwEl("pwfazy").value = String(z.fazy || 3); pwEl("pwchladivo").value = z.chladivo || "";
+  pwEl("pwtyp").innerHTML = D.typy_jednotky.map(t => `<option value="${esc(t)}"${t === z.typ ? " selected" : ""}>${esc(PW_JED[t] || t)}</option>`).join("");
+  pwEl("pwkurenie").innerHTML = D.typy_kurenia.map(t => `<option value="${esc(t)}"${t === z.kurenie ? " selected" : ""}>${esc(PW_KUR[t] || t)}</option>`).join("");
+  pwEl("pwtuv").checked = !!z.tuv;
+  const m = known ? D.modely.find(x => x.id === z.model) : null;
+  pwEl("pwmodelnote").textContent = m ? (m.overene ? "Tabuľka výkonu tohto modelu je overená na reálnom zariadení, COP sa počíta z nej."
+    : "Tabuľka výkonu pochádza z dokumentácie výrobcu a nebola overená na reálnom zariadení; COP a tepelný výkon sú orientačné.")
+    : "Bez tabuľky modelu sa COP a tepelný výkon nepočítajú z tabuľky výrobcu: použije sa prietok zo senzora, inak sa neukážu.";
+}
+function pwRenderEsp() {
+  const e = PW.p.esp, row = (sec, k, lab) => { const cur = e[sec][k] || "", req = PW_REQ.includes(k);
+    return `<div class="pwrow"><label class="pwl" for="pwe_${sec}_${k}">${esc(lab)}${req ? ` <span class="pwreq" title="povinné" aria-label="povinné">*</span>` : ""}</label>` +
+      `<select id="pwe_${sec}_${k}" data-pw="e:${sec}:${k}" data-path="esp.${sec}.${k}">${pwOpts(cur)}</select><span class="pwlive" id="pwv_${sec}_${k}">${esc(pwLive(cur))}</span></div>`; };
+  pwEl("pwesp").innerHTML = `<h5 style="margin:12px 0 0;font-size:13px;color:var(--ink-2)">Veličiny čerpadla</h5>` + Object.keys(PW_DEV).map(k => row("entity", k, PW_DEV[k])).join("") +
+    `<h5 style="margin:14px 0 0;font-size:13px;color:var(--ink-2)">Nastavenia (FSV)</h5>` + Object.keys(PW_SET).map(k => row("nastavenia", k, PW_SET[k])).join("");
+}
+function pwRenderRooms() {
+  const rs = PW.p.izby;
+  pwEl("pwrooms").innerHTML = rs.map((r, i) => {
+    const chips = (r.ha || []).map((id, j) => `<span class="pwchip"><span>${esc(id)}</span><button type="button" data-act="ha-del" data-i="${i}" data-j="${j}" aria-label="Odobrať senzor ${esc(id)}">×</button></span>`).join("");
+    return `<div class="pwroom" data-i="${i}"><div class="pwroomhead"><label class="pwref"><input type="radio" name="pwref" data-pw="r:${i}:ref"${r.referencna ? " checked" : ""}>Referenčná izba</label>` +
+      `<span class="pwbtns"><button type="button" class="btn sm ico" data-act="room-up" data-i="${i}" aria-label="Posunúť vyššie"${i === 0 ? " disabled" : ""}>↑</button>` +
+      `<button type="button" class="btn sm ico" data-act="room-down" data-i="${i}" aria-label="Posunúť nižšie"${i === rs.length - 1 ? " disabled" : ""}>↓</button>` +
+      `<button type="button" class="btn sm danger" data-act="room-del" data-i="${i}"${rs.length < 2 ? " disabled" : ""}>Odobrať</button></span></div>` +
+      `<div class="pwgrid"><div class="form"><label for="pwr${i}n">Názov</label><input type="text" class="plain" id="pwr${i}n" maxlength="40" value="${esc(r.nazov)}" data-pw="r:${i}:nazov" data-path="izby[${i}].nazov"></div>` +
+      `<div class="form"><label for="pwr${i}k">Kľúč${r._old ? " (nemenný)" : ""}</label><input type="text" id="pwr${i}k" maxlength="21" value="${esc(r.kluc)}"${r._old ? " readonly" : ""} spellcheck="false" autocapitalize="off" data-pw="r:${i}:kluc" data-path="izby[${i}].kluc"></div>` +
+      `<div class="form"><label for="pwr${i}e">Entita v ESP</label><select id="pwr${i}e" data-pw="r:${i}:esp" data-path="izby[${i}].esp">${pwOpts(r.esp)}</select></div>` +
+      `<div class="form"><label for="pwr${i}m">Minimum (°C)</label><input type="number" id="pwr${i}m" step="0.5" inputmode="decimal" value="${r.referencna ? "" : esc(r.min ?? "")}" placeholder="${r.referencna ? "riadi čerpadlo" : "napr. 21"}"${r.referencna ? " disabled" : ""} data-pw="r:${i}:min" data-path="izby[${i}].min"></div></div>` +
+      `<div class="form"><label for="pwr${i}h">Teplotné senzory v Home Assistante</label>${chips ? `<div class="pwchips">${chips}</div>` : `<div class="sub">Žiadny senzor.</div>`}` +
+      `<input type="text" id="pwr${i}h" list="pwhalist" placeholder="sensor.…  (vyber alebo vpíš)" spellcheck="false" autocapitalize="off" data-pw="r:${i}:haadd"${(r.ha || []).length >= 5 ? " disabled" : ""}></div></div>`; }).join("");
+  const nav = PW.esp && PW.esp.navrh && Array.isArray(PW.esp.navrh.izby) ? PW.esp.navrh.izby.filter(x => !rs.some(r => r.esp === x.esp)) : [];
+  const b = pwEl("pwroomesp"); b.hidden = !nav.length; b.textContent = "Doplniť izby z ESP (" + nav.length + ")";
+  pwEl("pwhalist").innerHTML = ((PW.ha && PW.ha.entity) || []).map(x => `<option value="${esc(x.entity_id)}">${esc(x.meno)}${x.stav != null ? " · " + esc(x.stav) + " °C" : ""}</option>`).join("");
+}
+function pwRenderLim() {
+  const kur = PW.p.zariadenie.kurenie, A = PW.data.abs_limity || {};
+  const pre = k => pwPreset(kur, k);
+  pwEl("pwlimnote").textContent = "Agent smie meniť len v týchto medziach (typ kúrenia: " + (PW_KUR[kur] || kur) + "). Predvolené hodnoty zodpovedajú typu kúrenia; absolútne hranice zariadenia sa nedajú prekročiť.";
+  const num = (k, j, v) => `<div class="form"><label for="pwl_${k}_${j}">${PW_LIMF[j]}</label><input type="number" id="pwl_${k}_${j}" step="${j === 3 ? 1 : 0.5}" inputmode="decimal" value="${esc(v)}" data-pw="l:${k}:${j}" data-path="mantinely.${k}"></div>`;
+  let h = PW_LIM.map(([k, lab]) => { const L = PW.lim[k], a = A[k], p = pre(k);
+    return `<div class="pwlim"><span class="pwl">${esc(lab)}</span><div class="pwlf">${L.v.map((v, j) => num(k, j, v)).join("")}</div>` +
+      `<span class="pwhint">${a ? "Absolútne hranice: " + f(a[0], 0) + " až " + f(a[1], 0) + " °C. " : ""}${p ? "Predvolené: " + f(p[0], 1) + " až " + f(p[1], 1) + ", krok " + f(p[2], 1) + ", raz za " + p[3] + " h." : ""}${L.custom ? " (upravené)" : ""}</span></div>`; }).join("");
+  const c = PW.p.mantinely.ciel_izby, ca = A.ciel_izby;
+  h += `<div class="pwlim"><span class="pwl">Cieľová izbová teplota (rozsah, ktorý smie nastaviť web a agent)</span><div class="pwlf">` +
+    [0, 1].map(j => `<div class="form"><label for="pwc${j}">${j ? "Max" : "Min"}</label><input type="number" id="pwc${j}" step="0.5" inputmode="decimal" value="${esc(c[j])}" data-pw="c:${j}" data-path="mantinely.ciel_izby"></div>`).join("") +
+    `</div><span class="pwhint">${ca ? "Absolútne hranice: " + f(ca[0], 0) + " až " + f(ca[1], 0) + " °C." : ""}</span></div>`;
+  pwEl("pwlim").innerHTML = h;
+}
+function pwRenderAll() { pwRenderDevice(); pwRenderEsp(); pwRenderRooms(); pwRenderLim(); }
+function pwClearErr() {
+  document.querySelectorAll("#pfform .bad").forEach(x => { x.classList.remove("bad"); x.removeAttribute("aria-invalid"); });
+  document.querySelectorAll("#pfform .pwfe").forEach(x => x.remove());
+  const b = pwEl("pwerr"); b.hidden = true; b.innerHTML = "";
+}
+function pwShowErr(list) {
+  const b = pwEl("pwerr"); b.hidden = !list.length;
+  b.innerHTML = list.length ? "<b>Skontroluj tieto položky:</b><ul>" + list.map(x => `<li>${esc(x)}</li>`).join("") + "</ul>" : "";
+  const done = new Set();
+  for (const x of list) {
+    const m = /^([A-Za-z0-9_.\[\]]+):\s*(.*)$/.exec(x); if (!m) continue;
+    const els = document.querySelectorAll(`#pfform [data-path="${m[1]}"]`);
+    els.forEach((el, n) => { el.classList.add("bad"); el.setAttribute("aria-invalid", "true");
+      if (n === els.length - 1 && !done.has(m[1])) { done.add(m[1]); const d = document.createElement("div"); d.className = "pwfe"; d.textContent = m[2]; (el.closest(".pwrow, .pwlim, .form") || el.parentNode).appendChild(d); } });
+  }
+}
+function pwBuild() {
+  const pl = JSON.parse(JSON.stringify(PW.p)), z = pl.zariadenie;
+  z.vykon_kw = pwNum(z.vykon_kw) ?? z.vykon_kw; z.fazy = Number(z.fazy) || 3;
+  pl.izby = pl.izby.map(r => ({kluc: String(r.kluc || "").trim(), nazov: String(r.nazov || "").trim(), esp: r.esp || "", referencna: !!r.referencna,
+    min: r.referencna ? null : pwNum(r.min), ha: (r.ha || []).slice(0, 5)}));
+  const ci = (pl.mantinely.ciel_izby || []).map(pwNum), m = {ciel_izby: ci};
+  for (const [k] of PW_LIM) if (PW.lim[k].custom) m[k] = PW.lim[k].v.map(pwNum);
+  pl.mantinely = m;
+  return pl;
+}
+function pwMissing(pl) {
+  const out = [];
+  for (const k of PW_REQ) { const sec = k.startsWith("fsv") ? "nastavenia" : "entity";
+    if (!(pl.esp[sec][k] || "")) out.push("esp." + sec + "." + k + ": povinná entita – vyber ju zo zoznamu."); }
+  return out;
+}
+function pwApplyNavrh(all) {
+  const n = PW.esp && PW.esp.navrh; if (!n) return 0; let c = 0;
+  for (const sec of ["entity", "nastavenia"]) for (const [k, v] of Object.entries(n[sec] || {})) {
+    if (!(k in PW.p.esp[sec])) continue;
+    if (all || !PW.p.esp[sec][k]) { if (PW.p.esp[sec][k] !== v) { PW.p.esp[sec][k] = v; c++; } } }
+  return c;
+}
+async function pwLoadEsp(manual) {
+  if (PW.espLoading || !PW.p) return; PW.espLoading = true;
+  if (manual) say("#pwespmsg", "Načítavam entity z ESP…");
+  try {
+    const r = await api("api/profil/esp_entity");
+    if (!authed) return;
+    if (r.error || !Array.isArray(r.entity)) { if (manual) say("#pwespmsg", r.error || "Entity sa nepodarilo načítať.", false); return; }
+    PW.esp = r; const n = pwApplyNavrh(false); if (n) PW.dirty = true;
+    pwRenderEsp(); pwRenderRooms();
+    if (manual) say("#pwespmsg", r.entity.length ? "Načítaných " + r.entity.length + " entít" + (n ? ", doplnených " + n + " podľa návrhu." : ".") : "ESP ani zberač zatiaľ nevrátili žiadne entity.", r.entity.length > 0);
+  } finally { PW.espLoading = false; }
+}
+async function pwLoadHa(manual) {
+  if (manual) say("#pwhamsg", "Načítavam…");
+  const r = await api("api/profil/ha_entity"); if (!authed) return;
+  PW.ha = r; pwRenderRooms();
+  if (manual) say("#pwhamsg", r.ok === false ? (r.dovod || r.error || "Home Assistant neodpovedá.") : "Načítaných " + (r.entity || []).length + " teplotných senzorov.", r.ok !== false && !r.error);
+}
+async function loadProfil(force) {
+  if (isUser()) return;
+  const r = await api("api/profil"); if (!authed) return;
+  if (r.error || !r.profil) { pwEl("pwstat").textContent = r.error || "Profil sa nepodarilo načítať."; pwEl("pwdot").className = "dot bad"; return; }
+  if (PW.dirty && !force) return;
+  PW.data = r; PW.p = JSON.parse(JSON.stringify(r.profil)); PW.p.izby.forEach(x => { x._old = true; });
+  pwInitLim(); PW.dirty = false; pwClearErr(); pwRenderAll();
+  const bad = Array.isArray(r.chyby) && r.chyby.length;
+  pwEl("pwdot").className = "dot " + (bad ? "bad" : "ok");
+  pwEl("pwstat").textContent = (r.ulozeny ? "Vlastný profil (profil.json)" : "Predvolený profil (bez profil.json)") + (bad ? " · uložený súbor má " + r.chyby.length + " chýb" : "");
+  if (bad) pwShowErr(r.chyby);
+  pwLoadEsp(false).catch(() => {}); pwLoadHa(false).catch(() => {});
+}
+function pwOnInput(e) {
+  const t = e.target, d = t && t.dataset && t.dataset.pw; if (!d || !PW.p) return;
+  const a = d.split(":"), z = PW.p.zariadenie, isChange = e.type === "change";
+  PW.dirty = true; t.classList.remove("bad"); t.removeAttribute("aria-invalid");
+  const fe = t.closest(".pwrow, .pwlim, .form"); if (fe) fe.querySelectorAll(".pwfe").forEach(x => x.remove());
+  if (a[0] === "z") {
+    const k = a[1];
+    if (k === "modelsel") { if (!isChange) return;
+      if (t.value === "__iny") { z.model = ""; } else { const m = PW.data.modely.find(x => x.id === t.value); z.model = t.value;
+        if (m) { if (m.typ) z.typ = m.typ; if (m.vykon_kw) z.vykon_kw = m.vykon_kw; if (m.chladivo) z.chladivo = m.chladivo; if (m.nazov) z.nazov = m.nazov; } }
+      pwRenderDevice(); return; }
+    if (k === "tuv") z.tuv = t.checked;
+    else if (k === "fazy") z.fazy = Number(t.value) || 3;
+    else if (k === "vykon_kw") z.vykon_kw = t.value;
+    else z[k] = t.value;
+    if (k === "kurenie") { for (const [lk] of PW_LIM) if (!PW.lim[lk].custom) PW.lim[lk].v = (pwPreset(z.kurenie, lk) || PW.lim[lk].v).slice(); pwRenderLim(); }
+    if (k === "model" && isChange) pwRenderDevice();
+  } else if (a[0] === "e") {
+    PW.p.esp[a[1]][a[2]] = t.value; const v = pwEl("pwv_" + a[1] + "_" + a[2]); if (v) v.textContent = pwLive(t.value);
+  } else if (a[0] === "r") {
+    const i = Number(a[1]), r = PW.p.izby[i]; if (!r) return;
+    if (a[2] === "nazov") { r.nazov = t.value; if (!r._old && !r._keyEdited) { r.kluc = pwSlug(t.value); pwEl("pwr" + i + "k").value = r.kluc; } }
+    else if (a[2] === "kluc") { r.kluc = t.value.trim(); r._keyEdited = true; }
+    else if (a[2] === "esp") r.esp = t.value;
+    else if (a[2] === "min") r.min = t.value;
+    else if (a[2] === "ref") { PW.p.izby.forEach((x, j) => { x.referencna = j === i; if (!x.referencna && (x.min == null || x.min === "")) x.min = 21; }); pwRenderRooms(); }
+    else if (a[2] === "haadd") { if (!isChange) return; const id = t.value.trim();
+      if (!id) return;
+      if (!/^sensor\.[A-Za-z0-9_]+$/.test(id)) { t.classList.add("bad"); return; }
+      r.ha = r.ha || []; if (!r.ha.includes(id) && r.ha.length < 5) r.ha.push(id); pwRenderRooms(); }
+  } else if (a[0] === "l") {
+    const L = PW.lim[a[1]]; L.v[Number(a[2])] = t.value; L.custom = true;
+  } else if (a[0] === "c") {
+    PW.p.mantinely.ciel_izby[Number(a[1])] = t.value;
+  }
+}
+function pwClick(e) {
+  const b = e.target.closest("[data-act]"); if (!b || !PW.p && b.dataset.act !== "esp-load") return;
+  const act = b.dataset.act, i = Number(b.dataset.i), rs = PW.p ? PW.p.izby : [];
+  PW.dirty = true;
+  if (act === "esp-load") { PW.dirty = false; pwLoadEsp(true).catch(() => {}); return; }
+  if (act === "esp-apply") { if (!PW.esp) { say("#pwespmsg", "Najprv načítaj entity z ESP.", false); return; }
+    const n = pwApplyNavrh(true); pwRenderEsp(); say("#pwespmsg", n ? "Podľa návrhu zmenených " + n + " entít." : "Návrh sa zhoduje s aktuálnym výberom.", true); return; }
+  if (act === "ha-load") { PW.dirty = false; pwLoadHa(true).catch(() => {}); return; }
+  if (act === "lim-preset") { for (const [k] of PW_LIM) PW.lim[k] = {v: (pwPreset(PW.p.zariadenie.kurenie, k) || PW.lim[k].v).slice(), custom: false}; pwRenderLim(); return; }
+  if (act === "room-add") { let n = rs.length + 1, k = "izba" + n; while (rs.some(x => x.kluc === k)) k = "izba" + (++n);
+    rs.push({kluc: k, nazov: "Izba " + n, esp: "", referencna: false, min: 21, ha: []}); pwRenderRooms(); return; }
+  if (act === "room-esp") { const nav = ((PW.esp && PW.esp.navrh && PW.esp.navrh.izby) || []).filter(x => !rs.some(r => r.esp === x.esp));
+    for (const x of nav) { let k = x.kluc, n = 2; while (rs.some(r => r.kluc === k)) k = (x.kluc + "_" + n++).slice(0, 21);
+      rs.push({kluc: k, nazov: x.nazov, esp: x.esp, referencna: false, min: 21, ha: []}); }
+    pwRenderRooms(); return; }
+  if (act === "room-del") { if (rs.length < 2 || !rs[i]) return; const was = rs[i].referencna; rs.splice(i, 1); if (was) rs[0].referencna = true; pwRenderRooms(); return; }
+  if (act === "room-up" && i > 0) { [rs[i - 1], rs[i]] = [rs[i], rs[i - 1]]; pwRenderRooms(); return; }
+  if (act === "room-down" && i < rs.length - 1) { [rs[i + 1], rs[i]] = [rs[i], rs[i + 1]]; pwRenderRooms(); return; }
+  if (act === "ha-del") { const r = rs[i]; if (r && r.ha) { r.ha.splice(Number(b.dataset.j), 1); pwRenderRooms(); } return; }
+}
+$("#profsettings").addEventListener("input", pwOnInput);
+$("#profsettings").addEventListener("change", pwOnInput);
+$("#profsettings").addEventListener("click", pwClick);
+$("#pfform").onsubmit = guard(async e => {
+  e.preventDefault(); if (!PW.p) return say("#pfmsg", "Profil ešte nie je načítaný.", false);
+  pwClearErr(); const pl = pwBuild(), miss = pwMissing(pl);
+  if (miss.length) { pwShowErr(miss); return say("#pfmsg", "Doplň povinné entity (označené *).", false); }
+  say("#pfmsg", "Ukladám…"); const r = await api("api/profil", {profil: pl});
+  if (Array.isArray(r.chyby) && r.chyby.length) { pwShowErr(r.chyby); return say("#pfmsg", "Profil obsahuje chyby – oprav ich a ulož znova.", false); }
+  if (r.error) return say("#pfmsg", r.error, false);
+  PW.dirty = false; say("#pfmsg", "Profil je uložený.", true); pwEl("pwrestart").hidden = false;
+  loadProfil(true).catch(() => {});
+}, "#pfmsg");
+$("#pwreset").onclick = guard(async () => {
+  if (!window.confirm("Obnoviť predvolený profil? Vlastný profil.json sa zmaže a po reštarte služieb sa použije pôvodná inštalácia.")) return;
+  say("#pfmsg", "Obnovujem…"); const r = await api("api/profil/predvoleny", {});
+  if (r.error) return say("#pfmsg", r.error, false);
+  PW.dirty = false; say("#pfmsg", "Predvolený profil je obnovený.", true); pwEl("pwrestart").hidden = false; await loadProfil(true);
+}, "#pfmsg");
+$("#pwrestartbtn").onclick = guard(async () => {
+  if (!window.confirm("Reštartovať služby agent, zberač a web? Web bude na pár sekúnd nedostupný.")) return;
+  say("#pwrestartmsg", "Reštartujem…"); const r = await api("api/restart", {});
+  if (r.error) return say("#pwrestartmsg", r.error, false);
+  if (!r.ok) return say("#pwrestartmsg", r.dovod || "Služby sa nepodarilo reštartovať.", false);
+  say("#pwrestartmsg", "Služby sa reštartujú, stránka sa o chvíľu obnoví.", true);
+  setTimeout(() => location.reload(), 7000);
+}, "#pwrestartmsg");
+
 /* želané teploty izieb */
 async function loadTargets() {
   const r = await api("api/targets"), box = $("#tgfields");
@@ -2537,8 +2912,8 @@ function resultTable(res) {
   const row = (l, b, a, d, n = 1, pct) => has(b, a, d) ? `<tr><td>${l}</td><td>${f(b, n)}</td><td>${f(a, n)}</td><td>${sg(d, n)}${pct != null ? ` (${sg(pct, 1)} %)` : ""}</td></tr>` : "";
   let t = `<tr class="sec"><td colspan="4">Teplota v izbách, °C</td></tr>`;
   for (const k of RKEYS) t += row(RN[k], B.rooms?.[k], A.rooms?.[k], D.rooms?.[k]);
-  let t2 = ""; for (const k of RKEYS) if (k !== "detska") t2 += row(RN[k], B.diff?.[k], A.diff?.[k], D.diff?.[k]);
-  if (t2) t += `<tr class="sec"><td colspan="4">Rozdiel voči detskej, °C</td></tr>` + t2;
+  let t2 = ""; for (const k of RKEYS) if (k !== RKEYS[0]) t2 += row(RN[k], B.diff?.[k], A.diff?.[k], D.diff?.[k]);
+  if (t2) t += `<tr class="sec"><td colspan="4">Rozdiel voči ${refGen()}, °C</td></tr>` + t2;
   t += `<tr class="sec"><td colspan="4">Ostatné</td></tr>` + row("Vonku", B.vonku, A.vonku, D.vonku) + row("kWh na 1 °C", B.kwh_na_stupen, A.kwh_na_stupen, D.kwh_na_stupen, 2, D.kwh_na_stupen_pct) + row("ΔT pri behu", B.dt_beh, A.dt_beh, D.dt_beh) + row("Otvorené okná, min", B.okna_min, A.okna_min, D.okna_min, 0);
   return `<div class="tscroll"><table class="cmp"><thead><tr><th>Ukazovateľ</th><th>Pred</th><th>Po</th><th>Zmena</th></tr></thead><tbody>${t}</tbody></table></div>`;
 }
@@ -2611,12 +2986,12 @@ function abResultHtml(res, st) {
   else if (res.v_ramci_sumu) big = `<div class="abbig"><span class="abnum small">rozdiel je v rámci šumu</span><span class="sub">odhad ${f(us)} % ± ${f(ne)} %, test nepreukázal úsporu</span></div>`;
   else big = `<div class="abbig"><span class="abnum">${us > 0 ? "" : "−"}${f(Math.abs(us))}<small>%</small></span><span class="sub">${us > 0 ? "menej energie s reguláciou podľa izby" : "viac energie s reguláciou podľa izby"}${ne != null ? " · neistota ± " + f(ne) + " %" : " · neistotu zatiaľ nejde odhadnúť"}</span></div>`;
   const rows = [["Platné dni", A.n, B.n, 0], ["Spotreba na 1 °C a hodinu, kWh", A.ua, B.ua, 3], ["Spotreba za deň (04:00 – 24:00), kWh", A.kwh, B.kwh, 1],
-    ["Priemer v izbách, °C", A.t_in, B.t_in, 1], ["Vonku, °C", A.t_out, B.t_out, 1], ["Detská izba, °C", A.detska, B.detska, 2],
-    ["Hodiny detskej mimo 23 – 24 °C", A.mimo_pasma_h, B.mimo_pasma_h, 1], ["Výstupná voda, °C", A.tw2, B.tw2, 1], ["Otvorené okná, min za deň", A.okna_min, B.okna_min, 0]];
+    ["Priemer v izbách, °C", A.t_in, B.t_in, 1], ["Vonku, °C", A.t_out, B.t_out, 1], [RN[RKEYS[0]] + (RKEYS[0] === "detska" ? " izba" : "") + ", °C", A.detska, B.detska, 2],
+    ["Hodiny " + refGen() + " mimo 23 – 24 °C", A.mimo_pasma_h, B.mimo_pasma_h, 1], ["Výstupná voda, °C", A.tw2, B.tw2, 1], ["Otvorené okná, min za deň", A.okna_min, B.okna_min, 0]];
   const cmp = `<div class="tscroll"><table class="cmp"><thead><tr><th>Ukazovateľ</th><th>A · regulácia podľa izby</th><th>B · bez regulácie</th></tr></thead><tbody>` +
     rows.map(([l, a, b, n]) => `<tr><td>${esc(l)}</td><td>${f(a, n)}</td><td>${f(b, n)}</td></tr>`).join("") + `</tbody></table></div>`;
   const days = (res.days || []).filter(d => d.hours != null || d.note);
-  const dt = days.length ? `<details style="margin-top:14px"><summary>Výsledky po dňoch</summary><div class="tscroll" style="margin-top:8px"><table class="cmp"><thead><tr><th>Deň</th><th>Režim</th><th>kWh na 1 °C a h</th><th>kWh</th><th>Vnútri</th><th>Vonku</th><th>Detská</th><th>Mimo pásma, h</th><th>Voda</th><th>Štarty</th><th>Okná, min</th><th class="txt">Poznámka</th></tr></thead><tbody>` +
+  const dt = days.length ? `<details style="margin-top:14px"><summary>Výsledky po dňoch</summary><div class="tscroll" style="margin-top:8px"><table class="cmp"><thead><tr><th>Deň</th><th>Režim</th><th>kWh na 1 °C a h</th><th>kWh</th><th>Vnútri</th><th>Vonku</th><th>${esc(RN[RKEYS[0]])}</th><th>Mimo pásma, h</th><th>Voda</th><th>Štarty</th><th>Okná, min</th><th class="txt">Poznámka</th></tr></thead><tbody>` +
     days.map(d => `<tr class="${d.valid ? "" : "bad"}"><td>${esc(abDate(d.date))}</td><td>${esc(d.mode)}</td><td>${f(d.ua, 3)}</td><td>${f(d.kwh, 1)}</td><td>${f(d.t_in, 1)}</td><td>${f(d.t_out, 1)}</td><td>${f(d.detska, 2)}</td><td>${d.mimo_pasma_h == null ? "–" : d.mimo_pasma_h}</td><td>${f(d.tw2, 1)}</td><td>${d.starty == null ? "–" : d.starty}</td><td>${f(d.okna_min, 0)}</td><td class="note">${esc(d.note || (d.valid ? "" : "nezapočítané"))}</td></tr>`).join("") + `</tbody></table></div></details>` : "";
   const title = st && st.status === "done" ? "Výsledok testu" : st && st.status === "stopped" ? "Výsledok zo zastaveného testu" : "Priebežný výsledok";
   return `<p class="h3">${title}</p>${big}` + (res.verdikt ? `<div class="callout note" style="margin:10px 0 14px">${esc(res.verdikt)}</div>` : "") + cmp + dt +

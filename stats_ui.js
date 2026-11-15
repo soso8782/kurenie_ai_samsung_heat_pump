@@ -33,10 +33,13 @@ const SER = {
   beh_min: {c: "--copper", bar: true}, hz_avg: {c: "--s1"}, hz_max: {c: "--s2", dash: true}, kwh: {c: "--s4", bar: true},
   kwh_pump: {c: "--copper", bar: true}, kwh_dom: {c: "--cool"}, cop: {c: "--s3", bar: true}
 };
-const DAY_CARDS = [
+/* izby a ďalšie sledované teploty sa berú z metrík (/api/stats/meta, generuje ich stats.py z profilu); skupina „izby“ bez „ciel“ */
+const roomKeys = () => metricList().filter(m => m.group === "izby" && m.key !== "ciel").map(m => m.key);
+const roomSer = k => { const i = roomKeys().indexOf(k); return {c: "--s" + (((i < 0 ? 0 : i) % 8) + 1)}; };
+const dayCards = () => [
   {id: "t", title: "Teploty", plots: [
     {id: "vonku", h: 120, label: "Vonku, °C", keys: ["vonku"]},
-    {id: "izby", h: 220, label: "Izby a referenčná teplota, °C", keys: ["ciel", "detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna", "chodba", "kotolna"]}]},
+    {id: "izby", h: 220, label: "Izby a referenčná teplota, °C", keys: ["ciel"].concat(roomKeys())}]},
   {id: "w", title: "Voda a bojler", plots: [{id: "voda", h: 200, label: "°C", keys: ["tw2", "tw1", "wl", "tuv"]}]},
   {id: "k", title: "Kompresor", plots: [
     {id: "beh", h: 120, label: "Chod kompresora, minút za hodinu", keys: ["beh_min"], bars: true, fixed: [0, 60]},
@@ -47,8 +50,8 @@ const DAY_CARDS = [
   {id: "c", title: "Účinnosť (COP)", nomsg: "COP nie je k dispozícii: chýbajú platné údaje o prietoku vody alebo spotrebe.", plots: [
     {id: "cop", h: 130, label: "COP po hodinách (vyrobené teplo / spotreba)", keys: ["cop"], bars: true, zero: true}]}
 ];
-const COLG = [
-  ["teploty", "Teploty", ["vonku", "ciel", "detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna", "chodba", "kotolna"]],
+const colGroups = () => [
+  ["teploty", "Teploty", ["vonku", "ciel"].concat(roomKeys())],
   ["voda", "Voda", ["tw2", "tw1", "wl", "dt_beh"]],
   ["tuv", "TÚV", ["tuv", "tuv_ciel", "tuv_min"]],
   ["kompresor", "Kompresor", ["beh_min", "kurenie_min", "odmraz_min", "starty", "hz_avg", "hz_max"]],
@@ -157,7 +160,8 @@ function M(key) {
 const mUnit = k => M(k).unit || "";
 const fm = (k, v) => f(v, M(k).decimals);
 const fmu = (k, v) => { const u = mUnit(k); return f(v, M(k).decimals) + (u && num(v) !== null ? " " + u : ""); };
-const valCol = k => (SER[k] && SER[k].c) || "--copper";
+const serOf = k => SER[k] || (M(k).group === "izby" ? roomSer(k) : {});
+const valCol = k => serOf(k).c || "--copper";
 
 /* ---------- tooltip ---------- */
 function tipShow(html, cx, cy) {
@@ -394,7 +398,7 @@ function tilesHtml(s) {
   return t.join("");
 }
 function roomsHtml(s) {
-  const keys = ["detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna", "chodba", "kotolna"].filter(k => num(s[k]) !== null);
+  const keys = roomKeys().filter(k => num(s[k]) !== null);
   if (!keys.length) return "";
   return `<div class="st-rooms"><span class="mut">Izby Ø</span>${keys.map(k => `<span>${esc(M(k).label)} <b>${f(s[k])} °C</b></span>`).join("")}</div>`;
 }
@@ -417,8 +421,9 @@ function renderTimeline(d) {
 }
 function renderHours() {
   const d = D.day, hrs = d ? arr(d.hours) : [], box = gid("st-day-hours"); if (!box) return;
-  const cols = COLG.filter(g => S.cols[g[0]]).flatMap(g => g[2]);
-  const metricKeys = COLG.flatMap(g => g[2]).filter(k => k !== "n" && k !== "src");
+  const cg = colGroups();
+  const cols = cg.filter(g => S.cols[g[0]]).flatMap(g => g[2]);
+  const metricKeys = cg.flatMap(g => g[2]).filter(k => k !== "n" && k !== "src");
   gid("st-hours-info").textContent = hrs.length ? hrs.length + " h" : "";
   if (!cols.length) { box.innerHTML = nodata("Zapni aspoň jednu skupinu stĺpcov."); return; }
   const head = "<tr><th>Hodina</th>" + cols.map(k => k === "n" ? `<th>Vzoriek</th>` : k === "src" ? `<th class="t">Zdroj</th>` : `<th>${esc(M(k).label)}<small>${esc(mUnit(k))}</small></th>`).join("") + "</tr>";
@@ -446,8 +451,8 @@ function drawDayCharts() {
   const SLBL = {kwh_pump: pumpCal ? "Čerpadlo (kalibrované)" : "Čerpadlo (odhad)", kwh_dom: "Dom spolu (elektromer)"};
   const W = host.clientWidth, N = hrs.length, xs = hrs.map((_, i) => i), step = W < 620 ? 6 : 3, ticks = [];
   hrs.forEach((h, i) => { const hh = num(h.h) !== null ? num(h.h) : i; if (hh % step === 0) ticks.push({x: i, label: pad2(hh) + ":00"}); });
-  const cards = DAY_CARDS.map(card => {
-    const pl = card.plots.map(pc => ({pc, series: pc.keys.map(k => { const sd = SER[k] || {};
+  const cards = dayCards().map(card => {
+    const pl = card.plots.map(pc => ({pc, series: pc.keys.map(k => { const sd = serOf(k);
       const se = {id: "d:" + k, key: k, label: SLBL[k] || M(k).label, color: valCol(k), dash: !!sd.dash, bar: !!sd.bar, w: 2, xs, vals: hrs.map(h => num(h[k])), aligned: true, hidden: !!hiddenSer["d:" + k]};
       se.has = se.vals.some(v => v !== null); return se; })})).filter(x => x.series.filter(s => s.has).length >= (x.pc.need || 1));
     const items = pl.flatMap(x => x.series).filter((s, i, a) => s.has && a.findIndex(o => o.id === s.id && o.has) === i);
@@ -936,7 +941,7 @@ function build() {
   <section class="panel pad" id="st-day-pcal"><div class="st-sub"><h2>Kalibrácia spotreby</h2><span class="sub">podľa elektromera celého domu</span></div><div id="st-day-cal"></div></section>
   <section class="panel pad" id="st-day-p2"><div class="st-sub"><h2>Grafy</h2><span class="sub">Spoločný kurzor; legendou možno rady vypínať. Chýbajúce údaje sú šedé pásy, nie nula.</span></div><div id="st-day-charts"></div></section>
   <section class="panel pad" id="st-day-p3"><div class="st-sub"><h2>Hodina po hodine</h2><span class="sub" id="st-hours-info"></span></div>
-    <div class="st-cols" id="st-day-cols" role="group" aria-label="Skupiny stĺpcov">${COLG.map(g => `<button type="button" class="chip st-ch" data-act="col" data-g="${g[0]}" aria-pressed="${!!S.cols[g[0]]}">${g[1]}</button>`).join("")}</div>
+    <div class="st-cols" id="st-day-cols" role="group" aria-label="Skupiny stĺpcov">${colGroups().map(g => `<button type="button" class="chip st-ch" data-act="col" data-g="${g[0]}" aria-pressed="${!!S.cols[g[0]]}">${g[1]}</button>`).join("")}</div>
     <div class="st-scroll" id="st-day-hours"></div></section>
   <section class="panel pad" id="st-day-p4"><div class="st-sub"><h2>Cykly kompresora</h2><span class="sub" id="st-cyc-info"></span></div><div class="st-scroll" id="st-day-cycles"></div></section>
   <section class="panel pad" id="st-day-p5"><div class="st-sub"><h2>Poruchy dňa</h2><span class="sub" id="st-dfault-info"></span></div><div id="st-day-faults"></div></section>

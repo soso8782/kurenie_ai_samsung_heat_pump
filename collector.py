@@ -9,7 +9,29 @@ Zmeny prepínačov, režimov, nastavení a textových stavov ukladá ako udalost
 """
 import json, os, re, sqlite3, threading, time, urllib.request
 
-ESP = os.environ.get("TC_ESP", "http://192.168.1.199")
+try:
+    import profil
+    from common import load_cfg
+except ImportError:   # zberač spustený samostatne bez ostatných modulov: predvolený dom
+    profil = None
+    load_cfg = None
+
+
+def _esp_url():
+    """Adresa ESP: premenná TC_ESP, inak ESP_URL z config.env (cez common.load_cfg), inak doterajšia predvolená."""
+    if os.environ.get("TC_ESP"):
+        return os.environ["TC_ESP"]
+    try:
+        if load_cfg:
+            u = (load_cfg().get("ESP_URL") or "").strip().rstrip("/")
+            if u:
+                return u
+    except Exception:
+        pass
+    return "http://192.168.1.199"
+
+
+ESP = _esp_url()
 DB = os.environ.get("TC_DB", "/opt/tc-monitor/tc.db")
 SAMPLE_S = int(os.environ.get("TC_SAMPLE_S", "60"))
 END = float(os.environ.get("TC_END", "0"))  # unix čas konca zberu, 0 = bez konca
@@ -214,8 +236,12 @@ def stream():
 SNAP_S = 30
 
 # Entity, ktoré ESP v /events neposiela (homeassistant senzory) - čítajú sa cez REST
-REST_POLL = ["Izba Kuchyňa", "Izba Jedáleň", "Radiátor Jedáleň (hlavica)", "Izba Obývačka", "Izba Detská (Zigbee)",
-             "Izba Kúpeľňa", "Izba Spálňa", "Izba Pracovňa"]
+if profil is not None:
+    _P = profil.load()
+    REST_POLL = [r["esp"] for r in _P["izby"] if r["esp"]] + list(_P["esp"].get("rest_extra") or [])
+else:
+    REST_POLL = ["Izba Kuchyňa", "Izba Jedáleň", "Radiátor Jedáleň (hlavica)", "Izba Obývačka", "Izba Detská (Zigbee)",
+                 "Izba Kúpeľňa", "Izba Spálňa", "Izba Pracovňa"]
 
 
 def rest_poll():

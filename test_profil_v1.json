@@ -1,0 +1,230 @@
+{
+ "S": {
+  "vonku": "Vonkajšia teplota",
+  "detska": "Sledovaná teplota (Detská izba)",
+  "ciel": "Aktuálna cieľová teplota izby",
+  "posun": "Posun ekvitermickej krivky",
+  "wl": "Cieľová ekvitermická voda (WL)",
+  "tw2": "Výstupná teplota vody (Tw2)",
+  "tw1": "Spiatočka (Tw1)",
+  "dt": "Delta T vykurovacej vody",
+  "freq": "Frekvencia kompresora",
+  "prikon": "Odhadovaný príkon TČ",
+  "bojler": "Teplota TÚV (Bojler)",
+  "pwm": "Otáčky obehového čerpadla (PWM)",
+  "jedalen": "Izba Jedáleň",
+  "kuchyna": "Izba Kuchyňa",
+  "obyvacka": "Izba Obývačka",
+  "detska_z": "Izba Detská (Zigbee)",
+  "spalna": "Izba Spálňa",
+  "pracovna": "Izba Pracovňa",
+  "kupelna": "Izba Kúpeľňa",
+  "chyba": "Chybový kód TČ",
+  "spotreba": "Denná spotreba TČ"
+ },
+ "TC": {
+  "vonku": "Vonkajšia teplota",
+  "ciel": "Aktuálna cieľová teplota izby",
+  "detska": "Sledovaná teplota (Detská izba)",
+  "jedalen": "Izba Jedáleň",
+  "kuchyna": "Izba Kuchyňa",
+  "obyvacka": "Izba Obývačka",
+  "spalna": "Izba Spálňa",
+  "pracovna": "Izba Pracovňa",
+  "kupelna": "Izba Kúpeľňa",
+  "tw2": "Výstupná teplota vody (Tw2)",
+  "tw1": "Spiatočka (Tw1)",
+  "wl": "Cieľová ekvitermická voda (WL)",
+  "dt": "Delta T vykurovacej vody",
+  "tuv": "Teplota TÚV (Bojler)",
+  "tuv_ciel": "Cieľová teplota TÚV",
+  "freq": "Frekvencia kompresora",
+  "kwh": "Denná spotreba TČ",
+  "prikon": "Odhadovaný príkon TČ",
+  "chyba": "Chybový kód TČ",
+  "flow": "Prietok vody"
+ },
+ "SETTINGS": {
+  "fsv2031": "FSV 2031 WL2 voda pri najchladnejšom",
+  "fsv2032": "FSV 2032 WL2 voda pri najteplejšom",
+  "fsv4013": "FSV 4013 Vypnutie kúrenia nad vonk. teplotou",
+  "max_posun": "Maximálny kladný posun krivky",
+  "ciel_izba": "Cieľová izbová teplota"
+ },
+ "ROOMS": [
+  "detska",
+  "jedalen",
+  "kuchyna",
+  "obyvacka",
+  "spalna",
+  "pracovna",
+  "kupelna"
+ ],
+ "ROOM_NAMES": {
+  "detska": "Detská",
+  "jedalen": "Jedáleň",
+  "kuchyna": "Kuchyňa",
+  "obyvacka": "Obývačka",
+  "spalna": "Spálňa",
+  "pracovna": "Pracovňa",
+  "kupelna": "Kúpeľňa"
+ },
+ "TARGET_ROOMS": [
+  "jedalen",
+  "kuchyna",
+  "obyvacka",
+  "spalna",
+  "pracovna",
+  "kupelna"
+ ],
+ "TARGET_DEFAULTS": {
+  "jedalen": {
+   "min": 22.5
+  },
+  "kuchyna": {
+   "min": 22.5
+  },
+  "obyvacka": {
+   "min": 22.0
+  },
+  "spalna": {
+   "min": 21.0
+  },
+  "pracovna": {
+   "min": 21.0
+  },
+  "kupelna": {
+   "min": 22.0
+  }
+ },
+ "ALLOWED": {
+  "FSV 2031 WL2 voda pri najchladnejšom": [
+   42.0,
+   50.0,
+   1.0,
+   24,
+   1.0
+  ],
+  "FSV 2032 WL2 voda pri najteplejšom": [
+   32.0,
+   38.0,
+   1.0,
+   24,
+   1.0
+  ],
+  "FSV 4013 Vypnutie kúrenia nad vonk. teplotou": [
+   17.0,
+   24.0,
+   2.0,
+   24,
+   1.0
+  ],
+  "Maximálny kladný posun krivky": [
+   1.0,
+   4.0,
+   0.5,
+   12,
+   0.5
+  ]
+ },
+ "ROOM_TARGET": [
+  20.0,
+  24.5
+ ],
+ "COLUMN_IDS": [
+  [
+   "vonku",
+   [
+    "sensor.irimav20_temperature",
+    "sensor.m5stack_tc_vonkajsia_teplota_2"
+   ]
+  ],
+  [
+   "detska",
+   [
+    "sensor.detska_izba_espresense_detska_izba_detska_izba_teplota",
+    "sensor.detska_t_h_temperature"
+   ]
+  ],
+  [
+   "jedalen",
+   [
+    "sensor.0x00124b0029114db8_temperature"
+   ]
+  ],
+  [
+   "kuchyna",
+   [
+    "sensor.t_h_kuchyna_temperature"
+   ]
+  ],
+  [
+   "obyvacka",
+   [
+    "sensor.obyvacka_t_h_cidlo_temperature"
+   ]
+  ],
+  [
+   "spalna",
+   [
+    "sensor.spalna_t_h_cidlo_2_kruhovy_temperature"
+   ]
+  ],
+  [
+   "pracovna",
+   [
+    "sensor.pracovna_t_h_cidlo_temperature"
+   ]
+  ],
+  [
+   "kupelna",
+   [
+    "sensor.kupelna_t_h_temperature"
+   ]
+  ],
+  [
+   "chodba",
+   [
+    "sensor.t_h_sensor_chodba_teplota"
+   ]
+  ],
+  [
+   "kotolna",
+   [
+    "sensor.t_h_kotolna_teplota"
+   ]
+  ],
+  [
+   "tw2",
+   [
+    "sensor.technicka_miestnost_m5stack_tc_vystupna_teplota_vody_tw2"
+   ]
+  ],
+  [
+   "tw1",
+   [
+    "sensor.technicka_miestnost_m5stack_tc_spiatocka_tw1"
+   ]
+  ],
+  [
+   "wl",
+   [
+    "sensor.technicka_miestnost_m5stack_tc_cielova_ekvitermicka_voda_wl"
+   ]
+  ],
+  [
+   "tuv",
+   [
+    "sensor.technicka_miestnost_m5stack_tc_teplota_tuv_bojler"
+   ]
+  ]
+ ],
+ "VALVE": "3-cestný ventil (Smer ohrevu)",
+ "DEFROST": "Odmrazovanie",
+ "THERMOSTAT": "Termostat (požiadavka na teplo)",
+ "AGENT_TEMPS": {
+  "chodba": "sensor.t_h_sensor_chodba_teplota",
+  "kotolna": "sensor.t_h_kotolna_teplota"
+ },
+ "ROOM_TARGET_ENT": "Cieľová izbová teplota"
+}

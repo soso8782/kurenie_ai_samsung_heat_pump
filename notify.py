@@ -7,7 +7,7 @@ predplatiteľov) sa nikdy nelogujú ani nevracajú v odpovediach.
 """
 import base64, hashlib, ipaddress, json, os, re, threading, time, urllib.request
 from urllib.parse import urlparse
-from common import ROOT, adb, is_dry, tcq, S
+from common import REF_ROOM, ROOT, adb, is_dry, tcq, S
 try:   # Web Push potrebuje python3-cryptography; ak chýba, webhook funguje ďalej
     import webpush
 except Exception:
@@ -208,13 +208,13 @@ def push_remove(c, role, email, did):
 
 # ---------------------------------------------------------------- odoslanie pushu
 def badge_value(cfg):
-    """Zaokrúhlená aktuálna teplota detskej izby (celé číslo) alebo None, ak nie je čerstvá."""
+    """Zaokrúhlená aktuálna teplota referenčnej izby (celé číslo) alebo None, ak nie je čerstvá."""
     try:
         meta = dict(tcq(cfg, "SELECT k, v FROM meta"))
         ls = int(meta.get("last_sample") or 0)
         if not ls or time.time() - ls > 3600:
             return None
-        rows = tcq(cfg, "SELECT value FROM samples WHERE ts=? AND entity=?", (ls, S["detska"]))
+        rows = tcq(cfg, "SELECT value FROM samples WHERE ts=? AND entity=?", (ls, S.get(REF_ROOM, "")))
         if rows and rows[0][0] is not None and -30 < rows[0][0] < 60:
             return int(round(rows[0][0]))
     except Exception:

@@ -13,6 +13,7 @@ Použitie (v priečinku kurenia):
 import argparse
 import datetime
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -23,27 +24,12 @@ if "TZ" not in os.environ and hasattr(time, "tzset"):
     time.tzset()
 
 import ha_ws
+import profil
 from common import ROOT, load_cfg
 
-TC_PREFIX = "sensor.technicka_miestnost_m5stack_tc_"
-# stĺpec -> štatistické id v HA v poradí priority (prvé id s hodnotou v danej hodine vyhráva)
-COLUMN_IDS = [
-    ("vonku", ["sensor.irimav20_temperature", "sensor.m5stack_tc_vonkajsia_teplota_2"]),
-    # riadiaca detská: ESPresense (nové čidlo), pre staršie obdobie náhradné Zigbee čidlo (o ~0,3 °C iné)
-    ("detska", ["sensor.detska_izba_espresense_detska_izba_detska_izba_teplota", "sensor.detska_t_h_temperature"]),
-    ("jedalen", ["sensor.0x00124b0029114db8_temperature"]),
-    ("kuchyna", ["sensor.t_h_kuchyna_temperature"]),
-    ("obyvacka", ["sensor.obyvacka_t_h_cidlo_temperature"]),
-    ("spalna", ["sensor.spalna_t_h_cidlo_2_kruhovy_temperature"]),
-    ("pracovna", ["sensor.pracovna_t_h_cidlo_temperature"]),
-    ("kupelna", ["sensor.kupelna_t_h_temperature"]),
-    ("chodba", ["sensor.t_h_sensor_chodba_teplota"]),
-    ("kotolna", ["sensor.t_h_kotolna_teplota"]),
-    ("tw2", [TC_PREFIX + "vystupna_teplota_vody_tw2"]),
-    ("tw1", [TC_PREFIX + "spiatocka_tw1"]),
-    ("wl", [TC_PREFIX + "cielova_ekvitermicka_voda_wl"]),
-    ("tuv", [TC_PREFIX + "teplota_tuv_bojler"]),
-]
+# stĺpec -> štatistické id v HA v poradí priority (prvé id s hodnotou v danej hodine vyhráva); z profilu (profil.json),
+# pri predvolenom profile rovnaké ako vo verzii 1 (riadiaca izba môže mať viac id: nové čidlo, pre staršie obdobie náhradné)
+COLUMN_IDS = profil.ha_columns(profil.load())
 VALUE_COLS = [c for c, _ in COLUMN_IDS] + ["vonku_min", "vonku_max", "kwh_dom"]
 ALL_IDS = list(dict.fromkeys(i for _, ids in COLUMN_IDS for i in ids))
 NEW_COLS = (("kwh_dom", "REAL"), ("kwh_cal", "REAL"), ("q_kwh", "REAL"), ("cop", "REAL"))   # pridané neskôr (SPEC_ENERGIA)
@@ -58,14 +44,15 @@ HOURLY_DDL = """CREATE TABLE IF NOT EXISTS hourly(
   beh_min REAL, kurenie_min REAL, odmraz_min REAL, starty INTEGER, hz_avg REAL, hz_max REAL,
   kwh REAL, prikon REAL,
   updated INTEGER, kwh_dom REAL, kwh_cal REAL, q_kwh REAL, cop REAL)"""
+_COL_RE = re.compile(r"^[a-z][a-z0-9_]{0,20}$")      # kľúče stĺpcov z profilu (do SQL idú len takto overené)
 META_DDL = "CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)"
 
 
 def migrate(conn):
     """Idempotentne doplní stĺpce pridané neskôr (staršia stats.db ich nemá)."""
     have = {r[1] for r in conn.execute("PRAGMA table_info(hourly)")}
-    for col, typ in NEW_COLS:
-        if col not in have:
+    for col, typ in NEW_COLS + tuple((c, "REAL") for c in VALUE_COLS if c not in dict(NEW_COLS)):
+        if col not in have and _COL_RE.match(col):
             try:
                 conn.execute("ALTER TABLE hourly ADD COLUMN %s %s" % (col, typ))
             except sqlite3.OperationalError:

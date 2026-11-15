@@ -3,14 +3,18 @@
 Zdroj: stats.db, tabuľka hourly (hodinové priemery); otvára sa len na čítanie. Iba štandardná knižnica."""
 import bisect, datetime as _dt, math, sqlite3, time
 
+import profil
 import stats
-from common import ROOM_NAMES
 
 KROKY = (1, 2, 3, 5)
 MIN_HODIN = 3
-IZBY = ["obyvacka", "detska", "jedalen", "kuchyna", "spalna", "pracovna", "kupelna", "chodba"]
+P = profil.load()
+# izby z profilu (referenčná prvá) a ďalšie sledované teploty (chodba, kotolňa, …); názvy z profilu
+IZBY = list(profil.room_keys(P)) + [k for k in profil.extra_temp_keys(P) if k != "kotolna"]   # kotolňa nie je obytná izba
 VODA = ["tw2", "tw1", "wl"]
-NAZVY = dict(ROOM_NAMES, chodba="Chodba", tw2="Voda výstup", tw1="Spiatočka", wl="Cieľ krivky")
+NAZVY = dict(profil.room_names(P), chodba="Chodba", kotolna="Kotolňa", tw2="Voda výstup", tw1="Spiatočka", wl="Cieľ krivky")
+for _k in IZBY:
+    NAZVY.setdefault(_k, _k.replace("_", " ").capitalize())
 
 
 def _hours(cfg, a, b):
@@ -121,14 +125,18 @@ def report(cfg, od=None, do=None, krok=2, now=None):
 
 
 # ---------------------------------------------------------------- SPEC_akokuri: na akú teplotu vody kúri čerpadlo pri akej vonkajšej teplote
-E_VONKU, E_TW2, E_TW1 = "Vonkajšia teplota", "Výstupná teplota vody (Tw2)", "Spiatočka (Tw1)"
-E_WL, E_FREQ, E_POSUN = "Cieľová ekvitermická voda (WL)", "Frekvencia kompresora", "Posun ekvitermickej krivky"
-NAST = [("fsv2011", "FSV 2011 Vonku najchladnejšie"), ("fsv2012", "FSV 2012 Vonku najteplejšie"),
-        ("fsv2021", "FSV 2021 WL1 voda pri najchladnejšom"), ("fsv2022", "FSV 2022 WL1 voda pri najteplejšom"),
-        ("fsv2031", "FSV 2031 WL2 voda pri najchladnejšom"), ("fsv2032", "FSV 2032 WL2 voda pri najteplejšom"),
-        ("fsv4013", "FSV 4013 Vypnutie kúrenia nad vonk. teplotou"), ("posun", E_POSUN),
-        ("max_posun_kladny", "Maximálny kladný posun krivky"), ("max_posun", "Maximálny posun krivky"),
-        ("zosilnenie", "Zosilnenie posunu krivky")]
+# entity zariadenia a nastavení krivky z profilu (chýbajúca entita = prázdny názov = žiadne dáta, nie pád)
+_dev = lambda k: profil.device_entity(k, P)
+_set = lambda k: profil.setting_entity(k, P)
+E_VONKU, E_TW2, E_TW1 = _dev("vonku"), _dev("tw2"), _dev("tw1")
+E_WL, E_FREQ, E_POSUN = _dev("wl"), _dev("freq"), _dev("posun")
+# (kľúč v odpovedi API, entita); „max_posun_kladny“ = profilové nastavenie max_posun, „max_posun“ = max_posun_zaporny (názvy z v1)
+NAST = [("fsv2011", _set("fsv2011")), ("fsv2012", _set("fsv2012")),
+        ("fsv2021", _set("fsv2021")), ("fsv2022", _set("fsv2022")),
+        ("fsv2031", _set("fsv2031")), ("fsv2032", _set("fsv2032")),
+        ("fsv4013", _set("fsv4013")), ("posun", E_POSUN),
+        ("max_posun_kladny", _set("max_posun")), ("max_posun", _set("max_posun_zaporny")),
+        ("zosilnenie", _set("zosilnenie"))]
 MIN_KURENIE = 30      # minút kúrenia v pásme
 ROZBEH = 10           # minút nepretržitého behu pred započítaním (aj po odmrazovaní)
 MAX_DNI = 400

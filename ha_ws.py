@@ -314,8 +314,14 @@ def _kind(msg):
 # (denne, so oneskorením ~1 deň). Entity `..._high/low_tariff_meter_reading` majú v HA len zriedka sa meniace stavy
 # (bez hodinového rozlíšenia), preto slúžia iba ako záloha, ak by externá štatistika chýbala.
 # ID závisia od vašej inštalácie – nastavte ich ako premenné prostredia (napr. Environment= v systemd službe).
-ENERGY_EXT_ID = os.environ.get("ENERGY_EXT_ID", "ssd_ims:odberne_miesto_actual_consumption")
-ENERGY_METER_IDS = tuple(x.strip() for x in os.environ.get(
+# Poradie: profil (`elektrina`, ak je neprázdny) -> premenné prostredia -> pôvodné predvolené hodnoty.
+try:
+    import profil as _profil
+    _EL = _profil.load().get("elektrina") or {}
+except Exception:   # modul používaný samostatne bez profilu
+    _EL = {}
+ENERGY_EXT_ID = (_EL.get("ims_stat") or "").strip() or os.environ.get("ENERGY_EXT_ID", "ssd_ims:odberne_miesto_actual_consumption")
+ENERGY_METER_IDS = tuple(_EL.get("meter_ids") or ()) or tuple(x.strip() for x in os.environ.get(
     "ENERGY_METER_IDS", "sensor.elektromer_high_tariff_meter_reading,sensor.elektromer_low_tariff_meter_reading").split(",") if x.strip())
 MAX_HOUR_KWH = 60.0               # viac kWh za hodinu pre dom je určite chyba údajov
 
@@ -365,7 +371,9 @@ def energy_hourly(cli, a, b):
     """Hodinová spotreba celého domu v kWh za [a, b) (unix s) z HA: ({začiatok_hodiny: kWh}, info).
     Hodnoty <= 0 sa vynechajú (dom nikdy nespotrebuje presne 0; nula znamená stuhnutý zdroj). Iba čítanie."""
     a, b = int(a), int(b)
-    ids = [ENERGY_EXT_ID] + list(ENERGY_METER_IDS)
+    ids = [i for i in [ENERGY_EXT_ID] + list(ENERGY_METER_IDS) if i]
+    if not ids:
+        return {}, {"zdroj": None, "hodin": 0}   # elektromer nie je nastavený
     res = cli.call({"type": "recorder/statistics_during_period", "start_time": _iso_utc(a), "end_time": _iso_utc(b),
                     "statistic_ids": ids, "period": "hour", "types": ["change"]})
     if not isinstance(res, dict):
@@ -373,10 +381,10 @@ def energy_hourly(cli, a, b):
 
     def ok(d):
         return {h: v for h, v in d.items() if a - 3600 < h < b and 0 < v <= MAX_HOUR_KWH}
-    ext = ok(_changes(res.get(ENERGY_EXT_ID)))
+    ext = ok(_changes(res.get(ENERGY_EXT_ID))) if ENERGY_EXT_ID else {}
     if ext:
         return ext, {"zdroj": "ssd_ims", "hodin": len(ext)}
-    hi, lo = _changes(res.get(ENERGY_METER_IDS[0])), _changes(res.get(ENERGY_METER_IDS[1]))
-    tot = {h: hi.get(h, 0.0) + lo.get(h, 0.0) for h in set(hi) | set(lo)}
+    tarify = [_changes(res.get(m)) for m in ENERGY_METER_IDS[:2]]   # VT a NT (alebo jediný elektromer)
+    tot = {h: sum(t.get(h, 0.0) for t in tarify) for h in set().union(*[set(t) for t in tarify])} if tarify else {}
     tot = ok(tot)
     return tot, {"zdroj": "tarify" if tot else None, "hodin": len(tot)}

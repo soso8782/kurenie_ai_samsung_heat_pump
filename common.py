@@ -2,6 +2,8 @@
 """Spoločné funkcie pre agenta kúrenia a web (iba štandardná knižnica)."""
 import json, os, sqlite3, time, urllib.request
 
+import profil
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 DEFAULTS = {
@@ -147,29 +149,10 @@ def tcq(cfg, sql, args=()):
 
 
 # kľúč -> názov entity v ESP (tabuľka samples)
-S = {
-    "vonku": "Vonkajšia teplota",
-    "detska": "Sledovaná teplota (Detská izba)",
-    "ciel": "Aktuálna cieľová teplota izby",
-    "posun": "Posun ekvitermickej krivky",
-    "wl": "Cieľová ekvitermická voda (WL)",
-    "tw2": "Výstupná teplota vody (Tw2)",
-    "tw1": "Spiatočka (Tw1)",
-    "dt": "Delta T vykurovacej vody",
-    "freq": "Frekvencia kompresora",
-    "prikon": "Odhadovaný príkon TČ",
-    "bojler": "Teplota TÚV (Bojler)",
-    "pwm": "Otáčky obehového čerpadla (PWM)",
-    "jedalen": "Izba Jedáleň",
-    "kuchyna": "Izba Kuchyňa",
-    "obyvacka": "Izba Obývačka",
-    "detska_z": "Izba Detská (Zigbee)",
-    "spalna": "Izba Spálňa",
-    "pracovna": "Izba Pracovňa",
-    "kupelna": "Izba Kúpeľňa",
-    "chyba": "Chybový kód TČ",
-    "spotreba": "Denná spotreba TČ",
-}
+P = profil.load()                 # profil inštalácie (bez profil.json = pôvodný dom, správanie ako v1.x)
+S = profil.esp_s(P)               # chýbajúca entita v profile = kľúč v S chýba
+REF_ROOM = profil.reference_room(P)   # referenčná izba (podľa nej firmvér posúva krivku)
+REF_NAME = profil.room_names(P)[REF_ROOM]
 INV = {v: k for k, v in S.items()}
 
 
@@ -192,7 +175,7 @@ def hour_stats(cfg, a, b):
         d[k + "_max"] = mx
         d["n"] = max(d.get("n", 0), cnt)
     # spotreba za hodinu = súčet kladných prírastkov denného počítadla (reset o polnoci / po reštarte ESP sa ignoruje)
-    sp = tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<? ORDER BY ts", (S["spotreba"], a - 120, b))
+    sp = tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<? ORDER BY ts", (S.get("spotreba", ""), a - 120, b))
     pv = None
     for ts, v in sp:
         if pv is not None and v is not None and ts >= a:
@@ -206,8 +189,8 @@ def hour_stats(cfg, a, b):
         if "kwh" in d:
             d["kwh"] = round(d["kwh"], 2)
     # kompresor: podiel behu, štarty, priemerná frekvencia počas behu, delta T iba počas behu
-    fr = tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<? ORDER BY ts", (S["freq"], a - 120, b))
-    dts = dict(tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<?", (S["dt"], a, b)))
+    fr = tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<? ORDER BY ts", (S.get("freq", ""), a - 120, b))
+    dts = dict(tcq(cfg, "SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<?", (S.get("dt", ""), a, b)))
     prev = None
     acc = {}
     for ts, v in fr:
@@ -234,10 +217,8 @@ def hour_stats(cfg, a, b):
     return hours
 
 
-SETTINGS = {"fsv2031": "FSV 2031 WL2 voda pri najchladnejšom", "fsv2032": "FSV 2032 WL2 voda pri najteplejšom",
-            "fsv4013": "FSV 4013 Vypnutie kúrenia nad vonk. teplotou", "max_posun": "Maximálny kladný posun krivky",
-            "ciel_izba": "Cieľová izbová teplota"}
-ROOMS = ("detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna")
+SETTINGS = profil.settings_map(P)
+ROOMS = profil.room_keys(P)       # referenčná izba prvá
 
 
 def day_bounds(dstr=None):
@@ -266,7 +247,7 @@ def day_summary(cfg, a, b, hours=None):
     hh = [h for h in hours if h.get("beh") is not None]
     s = {k: avg(k) for k in ROOMS + ("vonku", "wl", "tw2", "dt_beh", "posun", "bojler")}
     s.update(date=time.strftime("%Y-%m-%d", time.localtime(a)), vonku_min=ext("vonku_min", min), vonku_max=ext("vonku_max", max),
-             detska_min=ext("detska_min", min), detska_max=ext("detska_max", max),
+             **{REF_ROOM + "_min": ext(REF_ROOM + "_min", min), REF_ROOM + "_max": ext(REF_ROOM + "_max", max)},
              kwh=round(sum(h.get("kwh") or 0 for h in hours), 2),
              beh=round(sum(h["beh"] for h in hh) / len(hh)) if hh else None,
              starty=sum(h.get("starty") or 0 for h in hours), hodin_s_datami=len([h for h in hours if h.get("n")]))
@@ -278,8 +259,8 @@ def day_summary(cfg, a, b, hours=None):
     s["zmien_nastaveni"] = tcq(cfg, "SELECT count(*) FROM events WHERE ts>=? AND ts<? AND old IS NOT NULL AND entity IN (%s)"
                                % ",".join("?" * len(names)), (a, b, *names))[0][0]
     ciel, mp = s.get("ciel_izba") or 23.5, s.get("max_posun")
-    s["hod_pod_cielom"] = len([h for h in hours if h.get("detska") is not None and h["detska"] < ciel - 0.4])
-    s["hod_nad_cielom"] = len([h for h in hours if h.get("detska") is not None and h["detska"] > ciel + 0.4])
+    s["hod_pod_cielom"] = len([h for h in hours if h.get(REF_ROOM) is not None and h[REF_ROOM] < ciel - 0.4])
+    s["hod_nad_cielom"] = len([h for h in hours if h.get(REF_ROOM) is not None and h[REF_ROOM] > ciel + 0.4])
     s["hod_posun_na_maxime"] = len([h for h in hours if mp is not None and h.get("posun") is not None and h["posun"] >= mp - 0.05])
     s["hod_dt_vysoka"] = len([h for h in hours if (h.get("dt_beh") or 0) > 6.5])
     # spotreba prepočítaná na 1 °C rozdielu (vnútri 23 °C - vonku) a deň: porovnateľné medzi rôzne studenými dňami
@@ -287,9 +268,9 @@ def day_summary(cfg, a, b, hours=None):
         s["kwh_na_stupen"] = round(s["kwh"] / (23 - s["vonku"]), 2)
     else:
         s["kwh_na_stupen"] = None
-    if s.get("detska") is not None:
+    if s.get(REF_ROOM) is not None:
         for r in ROOMS[1:]:
-            s["rozdiel_" + r] = None if s.get(r) is None else round(s[r] - s["detska"], 2)
+            s["rozdiel_" + r] = None if s.get(r) is None else round(s[r] - s[REF_ROOM], 2)
     return s
 
 
@@ -299,11 +280,9 @@ def local_midnight(ts=None):
 
 
 # ---- želané teploty izieb (bod 7) ----
-ROOM_NAMES = {"detska": "Detská", "jedalen": "Jedáleň", "kuchyna": "Kuchyňa", "obyvacka": "Obývačka", "spalna": "Spálňa",
-              "pracovna": "Pracovňa", "kupelna": "Kúpeľňa"}
-TARGET_ROOMS = ("jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna")   # poradie v API
-TARGET_DEFAULTS = {"jedalen": {"min": 22.5}, "kuchyna": {"min": 22.5}, "obyvacka": {"min": 22.0},
-                   "spalna": {"min": 21.0}, "pracovna": {"min": 21.0}, "kupelna": {"min": 22.0}}
+ROOM_NAMES = profil.room_names(P)
+TARGET_ROOMS = profil.target_rooms(P)   # poradie v API
+TARGET_DEFAULTS = profil.target_defaults(P)
 
 
 def get_targets(c):

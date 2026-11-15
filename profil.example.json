@@ -1,0 +1,71 @@
+{
+  "verzia": 1,
+  "zariadenie": {
+    "model": "AE080CXYDGK",
+    "nazov": "Samsung EHS Mono 8 kW, podlahové kúrenie",
+    "typ": "mono",
+    "vykon_kw": 8.0,
+    "fazy": 3,
+    "chladivo": "R290",
+    "kurenie": "podlahove",
+    "tuv": false
+  },
+  "esp": {
+    "entity": {
+      "vonku": "Vonkajšia teplota",
+      "sledovana": "Sledovaná teplota (Obývačka)",
+      "ciel_akt": "Aktuálna cieľová teplota izby",
+      "posun": "Posun ekvitermickej krivky",
+      "wl": "Cieľová ekvitermická voda (WL)",
+      "tw2": "Výstupná teplota vody (Tw2)",
+      "tw1": "Spiatočka (Tw1)",
+      "dt": "Delta T vykurovacej vody",
+      "freq": "Frekvencia kompresora",
+      "prikon": "Odhadovaný príkon TČ",
+      "tuv": "",
+      "tuv_ciel": "",
+      "pwm": "",
+      "chyba": "Chybový kód TČ",
+      "kwh_den": "Denná spotreba TČ",
+      "flow": "Prietok vody",
+      "ventil": "",
+      "odmrazovanie": "Odmrazovanie",
+      "termostat": "",
+      "ciel_izby": "Cieľová izbová teplota"
+    },
+    "nastavenia": {
+      "fsv2011": "FSV 2011 Vonku najchladnejšie",
+      "fsv2012": "FSV 2012 Vonku najteplejšie",
+      "fsv2021": "FSV 2021 WL1 voda pri najchladnejšom",
+      "fsv2022": "FSV 2022 WL1 voda pri najteplejšom",
+      "fsv2031": "FSV 2031 WL2 voda pri najchladnejšom",
+      "fsv2032": "FSV 2032 WL2 voda pri najteplejšom",
+      "fsv4013": "FSV 4013 Vypnutie kúrenia nad vonk. teplotou",
+      "max_posun": "Maximálny kladný posun krivky",
+      "max_posun_zaporny": "",
+      "zosilnenie": ""
+    },
+    "rest_extra": []
+  },
+  "izby": [
+    {"kluc": "obyvacka", "nazov": "Obývačka", "esp": "Izba Obývačka", "referencna": true, "min": null,
+     "ha": ["sensor.obyvacka_teplota"]},
+    {"kluc": "kuchyna", "nazov": "Kuchyňa", "esp": "Izba Kuchyňa", "min": 21.0, "ha": ["sensor.kuchyna_teplota"]},
+    {"kluc": "spalna", "nazov": "Spálňa", "esp": "Izba Spálňa", "min": 19.0, "ha": ["sensor.spalna_teplota"]},
+    {"kluc": "detska", "nazov": "Detská", "esp": "Izba Detská", "min": 21.0, "ha": ["sensor.detska_teplota"]}
+  ],
+  "ine_teploty": {},
+  "ha": {
+    "vonku": ["sensor.vonkajsia_teplota"],
+    "tw2": [],
+    "tw1": [],
+    "wl": [],
+    "tuv": []
+  },
+  "mantinely": {
+    "ciel_izby": [19.0, 24.0],
+    "fsv2031": [30.0, 38.0, 1.0, 24, 1.0],
+    "fsv2032": [24.0, 30.0, 1.0, 24, 1.0]
+  },
+  "elektrina": {"ims_stat": "", "meter_ids": []}
+}

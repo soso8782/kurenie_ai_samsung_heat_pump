@@ -7,6 +7,7 @@ tc.db a agent.db sa otvárajú iba na čítanie (mode=ro); zapisuje sa výhradne
 import bisect, csv, datetime as _dt, io, json, os, re, sqlite3, time, traceback
 from urllib.parse import quote
 
+import profil
 from common import ROOT, cfg_int, load_cfg
 
 SCHEMA_VERSION = "1"
@@ -18,20 +19,9 @@ OPEN_FRESH_S = 600      # cyklus/porucha je „bežiaca“ len ak posledná vzor
 CHUNK_H = 168           # agregácia po týždňoch
 
 # ---------------------------------------------------------------- entity a stĺpce
-TC = {
-    "vonku": "Vonkajšia teplota",
-    "ciel": "Aktuálna cieľová teplota izby",
-    "detska": "Sledovaná teplota (Detská izba)",
-    "jedalen": "Izba Jedáleň", "kuchyna": "Izba Kuchyňa", "obyvacka": "Izba Obývačka", "spalna": "Izba Spálňa",
-    "pracovna": "Izba Pracovňa", "kupelna": "Izba Kúpeľňa",
-    "tw2": "Výstupná teplota vody (Tw2)", "tw1": "Spiatočka (Tw1)", "wl": "Cieľová ekvitermická voda (WL)",
-    "dt": "Delta T vykurovacej vody",
-    "tuv": "Teplota TÚV (Bojler)", "tuv_ciel": "Cieľová teplota TÚV",
-    "freq": "Frekvencia kompresora", "kwh": "Denná spotreba TČ", "prikon": "Odhadovaný príkon TČ",
-    "chyba": "Chybový kód TČ",
-    "flow": "Prietok vody",
-}
-INV = {v: k for k, v in TC.items()}
+# mapy entít, stĺpce a model zariadenia sa plnia z profilu (profil.json) v configure() na konci modulu
+TC = {}
+INV = {}
 CP_WATER = 4.186          # kJ/(kg·K); voda, ρ ≈ 1 kg/L
 FLOW_MIN, FLOW_MAX = 1.0, 100.0   # platný prietok v L/min (senzor pri nedostupnosti hlási 6553,5)
 COP_MIN_COV = 0.7         # aspoň 70 % bežiacich minút musí mať platný prietok a teploty
@@ -47,62 +37,66 @@ FLOWCAL_DAYS = 30         # z koľkých dní minútových vzoriek sa kalibruje p
 FLOWCAL_MIN_ROOM, FLOWCAL_MIN_TANK = 300, 60   # najmenší počet ustálených minút pre kúrenie / TÚV
 FLOWCAL_SETTLE_MIN = 15   # kompresor musí bežať aj v tejto dobe pred minútou (min)
 FLOWCAL_RANGE = {"room": (8.0, 60.0), "tank": (10.0, 90.0)}   # prijateľný rozsah prietoku [L/min]
-FLOWCAL_ZDROJ = "tabuľky výrobcu (AE120JXED, bez odmrazovania)"
-VALVE = "3-cestný ventil (Smer ohrevu)"
-DEFROST = "Odmrazovanie"
-THERMOSTAT = "Termostat (požiadavka na teplo)"
-AGENT_TEMPS = {"chodba": "sensor.t_h_sensor_chodba_teplota", "kotolna": "sensor.t_h_kotolna_teplota"}
+FLOWCAL_ZDROJ = ""
+VALVE = DEFROST = THERMOSTAT = ""
+AGENT_TEMPS = {}
+MODEL = None
 ALERT_KINDS = ("chyba_tc", "esp", "zberac", "dohrev", "agent_chyba", "ha")
 
-ROOM_KEYS = ("detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna", "chodba", "kotolna")
-HCOLS = ("vonku", "vonku_min", "vonku_max", "ciel", "detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna",
-         "kupelna", "chodba", "kotolna", "tw2", "tw1", "wl", "dt_beh", "tuv", "tuv_ciel", "tuv_min",
-         "beh_min", "kurenie_min", "odmraz_min", "starty", "hz_avg", "hz_max", "kwh", "prikon",
-         "kwh_dom", "kwh_cal", "q_kwh", "cop")
+ROOM_KEYS = ()
+HCOLS = ()
+AVG_KEYS = ()
 NEW_COLS = (("kwh_dom", "REAL"), ("kwh_cal", "REAL"), ("q_kwh", "REAL"), ("cop", "REAL"))   # pridané neskôr (ALTER TABLE)
-AVG_KEYS = ("vonku", "ciel", "detska", "jedalen", "kuchyna", "obyvacka", "spalna", "pracovna", "kupelna",
-            "tw2", "tw1", "wl", "tuv", "tuv_ciel", "prikon")
+_COL_RE = re.compile(r"^[a-z][a-z0-9_]{0,20}$")     # rovnaký tvar ako kľúče v profile (do SQL ide len takto overený názov)
+_EXTRA_NAMES = {"chodba": "Chodba", "kotolna": "Kotolňa"}
 
 
 def _m(key, label, unit, group, decimals, agg):
     return {"key": key, "label": label, "unit": unit, "group": group, "decimals": decimals, "agg": agg}
 
 
-METRICS = [
-    _m("vonku", "Vonku", "°C", "vonku", 1, "avg"),
-    _m("ciel", "Referenčná teplota", "°C", "izby", 1, "avg"),
-    _m("detska", "Detská (riadiaca)", "°C", "izby", 1, "avg"),
-    _m("jedalen", "Jedáleň", "°C", "izby", 1, "avg"),
-    _m("kuchyna", "Kuchyňa", "°C", "izby", 1, "avg"),
-    _m("obyvacka", "Obývačka", "°C", "izby", 1, "avg"),
-    _m("spalna", "Spálňa", "°C", "izby", 1, "avg"),
-    _m("pracovna", "Pracovňa", "°C", "izby", 1, "avg"),
-    _m("kupelna", "Kúpeľňa", "°C", "izby", 1, "avg"),
-    _m("chodba", "Chodba", "°C", "izby", 1, "avg"),
-    _m("kotolna", "Kotolňa", "°C", "izby", 1, "avg"),
-    _m("tw2", "Voda do domu (výstup)", "°C", "voda", 1, "avg"),
-    _m("tw1", "Spiatočka", "°C", "voda", 1, "avg"),
-    _m("wl", "Cieľová voda (krivka)", "°C", "voda", 1, "avg"),
-    _m("dt_beh", "ΔT pri behu", "K", "voda", 1, "avg"),
-    _m("tuv", "TÚV (bojler)", "°C", "tuv", 1, "avg"),
-    _m("tuv_ciel", "Cieľ TÚV", "°C", "tuv", 1, "avg"),
-    _m("tuv_min", "Ohrev TÚV (min)", "min", "tuv", 0, "sum"),
-    _m("beh_min", "Chod kompresora (min)", "min", "kompresor", 0, "sum"),
-    _m("kurenie_min", "Kúrenie (min)", "min", "kompresor", 0, "sum"),
-    _m("odmraz_min", "Odmrazovanie (min)", "min", "kompresor", 0, "sum"),
-    _m("starty", "Štarty", "", "kompresor", 0, "sum"),
-    _m("hz_avg", "Frekvencia Ø", "Hz", "kompresor", 0, "avg"),
-    _m("hz_max", "Frekvencia max", "Hz", "kompresor", 0, "max"),
-    _m("kwh", "Spotreba (odhad) kWh", "kWh", "energia", 2, "sum"),
-    _m("kwh_cal", "Spotreba (kalibrovaná) kWh", "kWh", "energia", 2, "sum"),
-    _m("kwh_dom", "Dom spolu, kWh", "kWh", "energia", 2, "sum"),
-    _m("prikon", "Príkon Ø (W)", "W", "energia", 0, "avg"),
-    _m("q_kwh", "Vyrobené teplo, kWh", "kWh", "ucinnost", 2, "sum"),
-    _m("cop", "COP", "", "ucinnost", 2, "ratio"),
-    _m("n", "Pokrytie (vzoriek za hodinu)", "", "kvalita", 0, "avg"),
+_M_HEAD = [
+    ("vonku", "Vonku", "°C", "vonku", 1, "avg"),
+    ("ciel", "Referenčná teplota", "°C", "izby", 1, "avg"),
 ]
-METRIC_KEYS = [m["key"] for m in METRICS]
-_MDEC = {m["key"]: m["decimals"] for m in METRICS}
+_M_TAIL = [
+    ("tw2", "Voda do domu (výstup)", "°C", "voda", 1, "avg"),
+    ("tw1", "Spiatočka", "°C", "voda", 1, "avg"),
+    ("wl", "Cieľová voda (krivka)", "°C", "voda", 1, "avg"),
+    ("dt_beh", "ΔT pri behu", "K", "voda", 1, "avg"),
+    ("tuv", "TÚV (bojler)", "°C", "tuv", 1, "avg"),
+    ("tuv_ciel", "Cieľ TÚV", "°C", "tuv", 1, "avg"),
+    ("tuv_min", "Ohrev TÚV (min)", "min", "tuv", 0, "sum"),
+    ("beh_min", "Chod kompresora (min)", "min", "kompresor", 0, "sum"),
+    ("kurenie_min", "Kúrenie (min)", "min", "kompresor", 0, "sum"),
+    ("odmraz_min", "Odmrazovanie (min)", "min", "kompresor", 0, "sum"),
+    ("starty", "Štarty", "", "kompresor", 0, "sum"),
+    ("hz_avg", "Frekvencia Ø", "Hz", "kompresor", 0, "avg"),
+    ("hz_max", "Frekvencia max", "Hz", "kompresor", 0, "max"),
+    ("kwh", "Spotreba (odhad) kWh", "kWh", "energia", 2, "sum"),
+    ("kwh_cal", "Spotreba (kalibrovaná) kWh", "kWh", "energia", 2, "sum"),
+    ("kwh_dom", "Dom spolu, kWh", "kWh", "energia", 2, "sum"),
+    ("prikon", "Príkon Ø (W)", "W", "energia", 0, "avg"),
+    ("q_kwh", "Vyrobené teplo, kWh", "kWh", "ucinnost", 2, "sum"),
+    ("cop", "COP", "", "ucinnost", 2, "ratio"),
+    ("n", "Pokrytie (vzoriek za hodinu)", "", "kvalita", 0, "avg"),
+]
+METRICS = []
+METRIC_KEYS = []
+_MDEC = {}
+
+
+def _metrics(p):
+    """Zoznam metrík pre UI štatistík: izby a ďalšie sledované teploty podľa profilu (referenčná izba je „riadiaca“)."""
+    ref = profil.reference_room(p)
+    names = profil.room_names(p)
+    out = [_m(*x) for x in _M_HEAD]
+    for k in profil.room_keys(p):
+        out.append(_m(k, names[k] + (" (riadiaca)" if k == ref else ""), "°C", "izby", 1, "avg"))
+    for k in profil.extra_temp_keys(p):
+        out.append(_m(k, _EXTRA_NAMES.get(k) or k.replace("_", " ").capitalize(), "°C", "izby", 1, "avg"))
+    return out + [_m(*x) for x in _M_TAIL]
+
 
 # poruchy: predvyplnené kódy (len INSERT OR IGNORE, úpravy používateľa sa nikdy neprepíšu)
 SEED_CODES = [
@@ -124,12 +118,6 @@ SEED_CODES = [
 ]
 
 DDL = """
-CREATE TABLE IF NOT EXISTS hourly(ts INTEGER PRIMARY KEY, n INTEGER, src TEXT,
-  vonku REAL, vonku_min REAL, vonku_max REAL, ciel REAL, detska REAL,
-  jedalen REAL, kuchyna REAL, obyvacka REAL, spalna REAL, pracovna REAL, kupelna REAL, chodba REAL, kotolna REAL,
-  tw2 REAL, tw1 REAL, wl REAL, dt_beh REAL, tuv REAL, tuv_ciel REAL, tuv_min REAL,
-  beh_min REAL, kurenie_min REAL, odmraz_min REAL, starty INTEGER, hz_avg REAL, hz_max REAL,
-  kwh REAL, prikon REAL, updated INTEGER, kwh_dom REAL, kwh_cal REAL, q_kwh REAL, cop REAL);
 CREATE TABLE IF NOT EXISTS cycles(id INTEGER PRIMARY KEY, ts_start INTEGER, ts_stop INTEGER, minutes REAL, f_max REAL, f_avg REAL,
   mode TEXT, vonku REAL, tw2_max REAL, reason TEXT, UNIQUE(ts_start));
 CREATE TABLE IF NOT EXISTS faults(id INTEGER PRIMARY KEY, ts_start INTEGER, ts_end INTEGER, code TEXT, source TEXT, title TEXT,
@@ -153,9 +141,17 @@ def _timeout(cfg):
         return 30.0
 
 
+def hourly_ddl():
+    """CREATE TABLE hourly so stĺpcami podľa profilu (pri predvolenom profile rovnaké stĺpce ako vo verzii 1)."""
+    cols = ["ts INTEGER PRIMARY KEY", "n INTEGER", "src TEXT"]
+    cols += ["%s %s" % (c, "INTEGER" if c == "starty" else "REAL") for c in HCOLS]
+    cols += ["updated INTEGER"]
+    return "CREATE TABLE IF NOT EXISTS hourly(%s);\n" % ", ".join(cols)
+
+
 def init_schema(con):
     """Vytvorí tabuľky, indexy a predvyplní zoznam kódov porúch. Idempotentné, nič neprepisuje."""
-    con.executescript(DDL)
+    con.executescript(hourly_ddl() + DDL)
     for code, title, desc, fix in SEED_CODES:
         con.execute("INSERT OR IGNORE INTO fault_codes(code, title, description, fix, editable) VALUES(?,?,?,?,1)",
                     (code, title, desc, fix))
@@ -164,15 +160,17 @@ def init_schema(con):
 
 
 def migrate(con):
-    """Idempotentná migrácia schémy: doplní stĺpce pridané neskôr (kwh_dom, kwh_cal, q_kwh, cop)."""
+    """Idempotentná migrácia schémy: doplní chýbajúce stĺpce hourly (kwh_dom, kwh_cal, q_kwh, cop a stĺpce izieb z profilu).
+    Stĺpce sa nikdy nemažú."""
     try:
         have = {r[1] for r in con.execute("PRAGMA table_info(hourly)")}
     except sqlite3.Error:
         return
     if not have:
         return
-    for col, typ in NEW_COLS:
-        if col not in have:
+    for col in HCOLS:
+        typ = "INTEGER" if col == "starty" else "REAL"
+        if col not in have and _COL_RE.match(col):
             try:
                 con.execute("ALTER TABLE hourly ADD COLUMN %s %s" % (col, typ))
             except sqlite3.OperationalError:       # súbežný proces ho už pridal
@@ -341,7 +339,7 @@ def _upsert_sql():
             "ELSE COALESCE(excluded.src, hourly.src) END, %s, updated=excluded.updated" % (cols, ph, sets))
 
 
-_UPSERT = _upsert_sql()
+_UPSERT = ""
 
 
 def _upsert_rows(con, rows):
@@ -364,13 +362,16 @@ def upsert_hourly(cfg, rows):
 def _agent_hourly(cfg, a, b):
     """Priemery chodby a kotolne z agent.db (temp_samples) po hodinách: {hodina: {stĺpec: hodnota}}."""
     out = {}
+    if not AGENT_TEMPS:
+        return out
     ac = _agent_ro(cfg)
     if ac is None:
         return out
     try:
         inv = {v: k for k, v in AGENT_TEMPS.items()}
-        rows = ac.execute("SELECT entity_id, ts - ts % 3600, avg(value) FROM temp_samples WHERE ts>=? AND ts<? "
-                          "AND entity_id IN (?,?) GROUP BY 1,2", (a, b, *AGENT_TEMPS.values())).fetchall()
+        rows = ac.execute("SELECT entity_id, ts - ts %% 3600, avg(value) FROM temp_samples WHERE ts>=? AND ts<? "
+                          "AND entity_id IN (%s) GROUP BY 1,2" % ",".join("?" * len(AGENT_TEMPS)),
+                          (a, b, *AGENT_TEMPS.values())).fetchall()
         for ent, h, v in rows:
             if v is not None:
                 out.setdefault(h, {})[inv[ent]] = round(v, 2)
@@ -426,20 +427,9 @@ def pth_kw(flow, tw2, tw1):
 
 
 # ---------------------------------------------------------------- tabuľka výrobcu a prietok podľa okruhu
-TAB_TA = (-20, -15, -10, -7, -2, 2, 7, 10, 15, 20)
-TAB_LW = (25, 30, 35, 40, 45, 50, 55)
-TAB_PEAK = {   # AE120JXED*H/EU, Maximum Heating Capacity (Peak Value): (HC kW, PI kW); None = mimo rozsahu
- -20: ((9.84, 3.38), (9.55, 3.91), (9.26, 4.45), (8.96, 4.99), None, None, None),
- -15: ((10.73, 3.38), (10.45, 3.91), (10.17, 4.45), (9.90, 4.99), (9.63, 5.53), None, None),
- -10: ((11.27, 3.33), (11.17, 3.85), (11.25, 4.37), (11.02, 4.90), (10.97, 5.44), (10.93, 5.97), (10.92, 6.48)),
- -7: ((11.59, 3.30), (11.61, 3.81), (11.64, 4.33), (11.70, 4.85), (11.77, 5.38), (11.87, 5.91), (12.01, 6.44)),
- -2: ((12.55, 3.02), (12.55, 3.50), (12.56, 3.97), (12.59, 4.45), (12.64, 4.93), (12.71, 5.42), (12.81, 5.90)),
- 2: ((13.06, 2.68), (13.06, 3.11), (13.07, 3.53), (13.09, 3.96), (13.13, 4.39), (13.18, 4.83), (13.26, 5.26)),
- 7: ((12.50, 1.95), (12.25, 2.27), (12.00, 2.59), (11.75, 2.91), (11.50, 3.23), (11.25, 3.55), (11.00, 3.87)),
- 10: ((13.05, 1.97), (12.81, 2.29), (12.58, 2.61), (12.34, 2.93), (12.10, 3.25), (11.86, 3.57), (11.62, 3.89)),
- 15: ((13.97, 2.00), (13.75, 2.32), (13.54, 2.64), (13.32, 2.96), (13.10, 3.29), (12.88, 3.61), (12.66, 3.93)),
- 20: ((14.89, 2.03), (14.69, 2.35), (14.50, 2.68), (14.30, 3.00), (14.10, 3.32), (13.90, 3.64), (13.70, 3.96)),
-}
+TAB_TA = ()          # tabuľka výrobcu sa berie z modelu zariadenia (modely/<id>.json cez profil.model()); bez modelu je prázdna
+TAB_LW = ()
+TAB_PEAK = {}        # {ta: ((HC kW, PI kW) | None, …)}, Maximum Heating Capacity (Peak Value)
 
 
 def _tab_cell(ta, j):
@@ -459,7 +449,10 @@ def _tab_pos(axis, x):
 
 def cop_tab(tamb, lwt):
     """COP = HC/PI z tabuľky výrobcu (Peak = bez odmrazovania): bilineárna interpolácia COP v bunkách tabuľky podľa vonkajšej
-    teploty a teploty výstupnej vody (zodpovedá kontrolným hodnotám zo SPEC_cop); vstupy sa orezávajú na rozsah tabuľky."""
+    teploty a teploty výstupnej vody (zodpovedá kontrolným hodnotám zo SPEC_cop); vstupy sa orezávajú na rozsah tabuľky.
+    Bez modelu zariadenia (žiadna tabuľka) vráti None."""
+    if not TAB_PEAK:
+        return None
     i, fi = _tab_pos(TAB_TA, tamb)
     j, fj = _tab_pos(TAB_LW, lwt)
     cop = 0.0
@@ -510,7 +503,10 @@ def flow_calc(samples, valve, defr_int, k):
         dt = t2[t] - t1[t]
         if dt < 1.5 or pk[t] < 300:
             continue
-        vals[v].append(cop_tab(vk[t], t2[t]) * pk[t] * k / 1000.0 / (CP_WATER * dt / 60.0))
+        ct = cop_tab(vk[t], t2[t])
+        if ct is None:                                 # bez tabuľky výrobcu sa prietok nekalibruje
+            continue
+        vals[v].append(ct * pk[t] * k / 1000.0 / (CP_WATER * dt / 60.0))
     out = {}
     for key, name, need in (("room", "kurenie", FLOWCAL_MIN_ROOM), ("tank", "tuv", FLOWCAL_MIN_TANK)):
         xs = sorted(vals[key])
@@ -545,17 +541,29 @@ def get_prietok(con):
 
 def flow_calibrate(cfg, now=None):
     """Prietok okruhov z tabuliek výrobcu za posledných FLOWCAL_DAYS dní minútových vzoriek tc.db; výsledok uloží do meta `prietok`.
+    Bez modelu (tabuľky) sa kalibrácia preskočí: uloží sa prázdny výsledok (prietok zo senzora / z konfigurácie).
     Nikdy nevyhodí výnimku (pri chybe vráti {"error": ...} a meta nemení)."""
     try:
         now = int(now or time.time())
+        if not TAB_PEAK:
+            res = {"kurenie": None, "tuv": None, "n_kurenie": 0, "n_tuv": 0, "p25_kurenie": None, "p75_kurenie": None,
+                   "p25_tuv": None, "p75_tuv": None, "ts": now, "datum": time.strftime("%Y-%m-%d %H:%M", time.localtime(now)),
+                   "zdroj": FLOWCAL_ZDROJ, "dovod": "model zariadenia bez tabuľky výrobcu"}
+            con = connect(cfg)
+            try:
+                _meta_set(con, "prietok", json.dumps(res, ensure_ascii=False))
+                con.commit()
+            finally:
+                con.close()
+            return res
         a = now - FLOWCAL_DAYS * 86400
         tc = _tc(cfg)
         try:
             keys = ("freq", "tw2", "tw1", "prikon", "vonku")
             samples = {x: {} for x in keys}
             for ts, ent, v in tc.execute("SELECT ts, entity, value FROM samples WHERE ts>=? AND ts<=? AND entity IN (%s) ORDER BY ts"
-                                         % ",".join("?" * len(keys)), (a, now, *[TC[x] for x in keys])):
-                if v is not None:
+                                         % ",".join("?" * len(keys)), (a, now, *[TC.get(x, "") for x in keys])):
+                if v is not None and ent in INV:
                     samples[INV[ent]][ts - ts % 60] = v
             valve, defr = _tracks(tc, a, now + 1)
             last = tc.execute("SELECT max(ts) FROM samples").fetchone()[0] or now
@@ -771,12 +779,12 @@ def compute_cycles(cfg, a=0, now=None):
     now = int(now or time.time())
     tc = _tc(cfg)
     try:
-        A = _extend_back(tc, TC["freq"], int(a))
-        fts, fv = _series(tc, TC["freq"], A)
+        A = _extend_back(tc, TC.get("freq", ""), int(a))
+        fts, fv = _series(tc, TC.get("freq", ""), A)
         if not fts:
             return []
-        vts, vv = _series(tc, TC["vonku"], A - PREV_S)
-        wts, wv = _series(tc, TC["tw2"], A)
+        vts, vv = _series(tc, TC.get("vonku", ""), A - PREV_S)
+        wts, wv = _series(tc, TC.get("tw2", ""), A)
         valve, defr = _tracks(tc, A, 2 ** 40)
         stops = []      # (ts, druh) druh: 'term' = termostat OFF
         for ts, ent, new, text in tc.execute(
@@ -896,7 +904,7 @@ def detect_faults(cfg, a=0, now=None, ongoing=False):
         tc = _tc(cfg)
         try:
             # --- kód chyby TČ
-            ent = TC["chyba"]
+            ent = TC.get("chyba", "")
             A = a if a_open is None else min(a, a_open)
             z = tc.execute("SELECT ts FROM samples WHERE entity=? AND ts<? AND value=0 ORDER BY ts DESC LIMIT 1", (ent, A)).fetchone()
             Ae = z[0] if z else 0
@@ -925,7 +933,7 @@ def detect_faults(cfg, a=0, now=None, ongoing=False):
                                     "auto_key": "tc_error:%d:%d" % (code, s)})
                 cnt += 1
             # --- výpadky dát (medzera vo vzorkách vonkajšej teploty > 10 min)
-            ent = TC["vonku"]
+            ent = TC.get("vonku", "")
             prev = tc.execute("SELECT ts FROM samples WHERE entity=? AND ts<? ORDER BY ts DESC LIMIT 1", (ent, A)).fetchone()
             prev = prev[0] if prev else None
             last = prev
@@ -1436,7 +1444,7 @@ def live(cfg, now=None):
     tc = _tc(cfg)
     try:
         valve = _tracks(tc, a0, now + 1)[0]
-        ents = [TC[x] for x in ("freq", "tw2", "tw1", "flow", "prikon", "kwh")]
+        ents = [TC[x] for x in ("freq", "tw2", "tw1", "flow", "prikon", "kwh") if x in TC]
         by = {}
         last = None
         for ts, ent, v in tc.execute("SELECT ts, entity, value FROM samples WHERE ts>=? AND entity IN (%s) ORDER BY ts"
@@ -1701,7 +1709,7 @@ def _pure(r, key):
     return b is not None and m is not None and b >= PURE_RUN_MIN and m >= PURE_SHARE * b
 
 
-_SEL = "SELECT ts, n, src, %s FROM hourly" % ",".join(HCOLS)
+_SEL = ""
 
 
 def _hourly(con, a, b):
@@ -1725,7 +1733,7 @@ def _timeline(cfg, con, a, b):
         tc = _tc(cfg)
         try:
             fr = tc.execute("SELECT ts, value FROM samples WHERE entity=? AND ts>=? AND ts<? AND value IS NOT NULL ORDER BY ts",
-                            (TC["freq"], a, b)).fetchall()
+                            (TC.get("freq", ""), a, b)).fetchall()
             if fr:
                 valve, defr = _tracks(tc, a, b)
                 segs = []
@@ -2031,6 +2039,44 @@ def export_csv(cfg, kind, **p):
                 rows.append([dd["date"], dd["label"], e["h"]] + [_num(e.get(m["key"]), m["decimals"]) for m in METRICS])
         return _csv(header, rows)
     raise ValueError("Neznámy druh exportu (povolené: day, range, compare).")
+
+
+# ---------------------------------------------------------------- profil inštalácie (profil.py)
+def configure(p=None):
+    """Naplní entity, stĺpce hodín, metriky a model zariadenia z profilu (pri importe z profil.json alebo predvoleného profilu).
+    Volá sa pri importe; testy ju môžu zavolať s iným profilom (a potom znova configure() pre pôvodný)."""
+    global TC, INV, VALVE, DEFROST, THERMOSTAT, AGENT_TEMPS, MODEL, TAB_TA, TAB_LW, TAB_PEAK, FLOWCAL_ZDROJ
+    global ROOM_KEYS, HCOLS, AVG_KEYS, METRICS, METRIC_KEYS, _MDEC, _UPSERT, _SEL
+    p = p if p is not None else profil.load()
+    TC = profil.esp_tc(p)
+    INV = {v: k for k, v in TC.items()}
+    VALVE = profil.device_entity("ventil", p)
+    DEFROST = profil.device_entity("odmrazovanie", p)
+    THERMOSTAT = profil.device_entity("termostat", p)
+    AGENT_TEMPS = {k: ids[0] for k, ids in p["ine_teploty"].items() if ids}
+    MODEL = profil.model(p)
+    if MODEL:
+        TAB_TA, TAB_LW, TAB_PEAK = tuple(MODEL["ta"]), tuple(MODEL["lw"]), dict(MODEL["tab"])
+        FLOWCAL_ZDROJ = ("tabuľky výrobcu (AE120JXED, bez odmrazovania)" if MODEL["id"] == "AE120JXEDGH"
+                         else "tabuľky výrobcu (%s, bez odmrazovania)" % (MODEL.get("nazov") or MODEL["id"]))
+    else:
+        TAB_TA, TAB_LW, TAB_PEAK = (), (), {}
+        FLOWCAL_ZDROJ = "bez tabuľky výrobcu (prietok zo senzora alebo z konfigurácie)"
+    rooms = profil.room_keys(p)
+    extra = profil.extra_temp_keys(p)
+    ROOM_KEYS = tuple(rooms) + tuple(extra)
+    HCOLS = (("vonku", "vonku_min", "vonku_max", "ciel") + ROOM_KEYS +
+             ("tw2", "tw1", "wl", "dt_beh", "tuv", "tuv_ciel", "tuv_min", "beh_min", "kurenie_min", "odmraz_min", "starty",
+              "hz_avg", "hz_max", "kwh", "prikon", "kwh_dom", "kwh_cal", "q_kwh", "cop"))
+    AVG_KEYS = (("vonku", "ciel") + tuple(rooms) + ("tw2", "tw1", "wl", "tuv", "tuv_ciel", "prikon"))
+    METRICS = _metrics(p)
+    METRIC_KEYS = [m["key"] for m in METRICS]
+    _MDEC = {m["key"]: m["decimals"] for m in METRICS}
+    _UPSERT = _upsert_sql()
+    _SEL = "SELECT ts, n, src, %s FROM hourly" % ",".join(HCOLS)
+
+
+configure()
 
 
 if __name__ == "__main__":

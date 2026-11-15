@@ -2,6 +2,33 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] – 2026-11-15
+
+Aplikáciu možno nastaviť pre iné tepelné čerpadlo Samsung EHS a iný dom bez úprav kódu. Bez `profil.json` sa správa
+presne ako 1.0.0.
+
+### Pridané
+- **Profil inštalácie** (`profil.json`, modul `profil.py`): model a typ zariadenia, typ kúrenia (radiátory / podlahové /
+  kombinované), názvy entít v ESP, izby (kľúč, názov, ESP entita, HA senzory, minimum, referenčná izba), ďalšie teploty,
+  zdroje histórie z HA, mantinely agenta s pevnými absolútnymi hranicami, elektromer. Podrobnosti: `docs/PROFIL.md`,
+  vzor `profil.example.json`.
+- **Sprievodca „Zariadenie a dom“** v Nastaveniach (admin): 4 kroky (zariadenie, entity ESP s automatickým návrhom,
+  izby, mantinely), uloženie s chybami pri poliach, návrat na predvolené, reštart služieb z webu.
+  Nové API `/api/profil`, `/api/profil/predvoleny`, `/api/profil/esp_entity`, `/api/profil/ha_entity`, `/api/restart`.
+- **Knižnica modelov** `modely/*.json`: tabuľky Maximum Heating Capacity (Peak) pre Samsung EHS Split
+  AE040/060/090/120/140/160JXED*H z dokumentácie výrobcu (overený na reálnom zariadení je len AE120JXEDGH).
+- **ESPHome šablóna** `esphome/samsung-ehs.yaml` s názvami entít podľa predvoleného profilu a návod `esphome/README.md`.
+- `profil_info` v `/api/status`: zariadenie, izby a dostupné funkcie.
+
+### Zmenené
+- Izby, referenčná izba, názvy entít, mantinely agenta, stĺpce hodinovej štatistiky a import histórie z HA sa berú z profilu
+  (konštanty ostávajú pod pôvodnými menami); `hourly` v `stats.db` sa pri novej izbe automaticky rozšíri o stĺpec.
+- Prompty agenta používajú izby a referenčnú izbu z profilu a vedia, či ide o radiátory alebo podlahovku.
+- Tabuľka výrobcu pre COP a kalibráciu prietoku sa číta z `modely/`; bez tabuľky sa použije prietok zo senzora alebo
+  z konfigurácie, inak sa výkon a COP nezobrazia (bez chyby).
+- Webové rozhranie skrýva funkcie, ktoré nie sú k dispozícii (TÚV, spotreba domu, agent bez kľúča), namiesto chýb.
+- Adresa ESP: `TC_ESP`, inak `ESP_URL` z `config.env`; elektromer: prednosť má pole `elektrina` v profile.
+
 ## [1.0.0] – 2026-11-15
 
 Prvé verejné vydanie.
@@ -17,4 +44,5 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v2.0.0
 [1.0.0]: https://github.com/soso8782/kurenie_ai_samsung_heat_pump/releases/tag/v1.0.0
