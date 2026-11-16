@@ -11,7 +11,7 @@ Režimy (tabuľka state, kľúč mode):  off = nič nerobí, advise = len radí,
 import json, re, socket, threading, time, traceback, urllib.error, urllib.parse, urllib.request
 import profil
 from common import (P, REF_NAME, REF_ROOM, ROOM_NAMES, ROOMS, S, SETTINGS, TARGET_ROOMS, adb, balance, cfg_int, day_bounds, day_summary,
-                    get_state, get_targets, hour_stats, is_dry, load_cfg, local_midnight, set_state, tcq)
+                    dhw_intervals, get_state, get_targets, hour_stats, is_dry, load_cfg, local_midnight, set_state, tcq)
 import abtest, contacts, dhw, interventions, notify, temps
 import i18n
 from i18n import tr
@@ -166,6 +166,11 @@ ZÁSAHY A ICH VÝSLEDKY
 Vo vstupe je sekcia "ZÁSAHY A ICH VÝSLEDKY": čakajúce zásahy (ručné aj tvoje) a deterministické vyhodnotenia z posledných 14 dní
 (porovnanie 24 h pred a po zásahu). Kým čaká zásah typu ventil, krivku (FSV 2031/2032) nemeň - systém to odmietne. Hotové výsledky
 zohľadni a neopakuj zmenu, ktorá sa neosvedčila.
+
+OHREV TÚV
+Sekcia "OHREVY TÚV ZA 7 DNÍ" a stĺpec "TÚV min" (hodinová tabuľka) aj "TÚV n/min" (denné súhrny) ukazujú, kedy 3-cestný ventil
+ohrieval bojler. V tom čase kompresor nekúri do izieb: beh%, štarty, Hz a kWh z hodín s ohrevom TÚV nepripisuj kúreniu a krátky pokles
+alebo spomalenie rastu teploty izieb počas ohrevu TÚV nie je dôvod meniť krivku.
 
 OKNÁ, DVERE A SEZÓNA
 Vo vstupe je sekcia "OKNÁ A DVERE (sezóna: zima alebo leto)" (otvorené okná a dvere z Home Assistanta, minúty otvorenia za 24 h)
@@ -346,6 +351,11 @@ INTERVENTIONS AND THEIR RESULTS
 The input has a section "INTERVENTIONS AND THEIR RESULTS": pending interventions (manual and yours) and deterministic evaluations from the last 14 days
 (comparison of 24 h before and after the intervention). While a valve-type intervention is pending, do not change the curve (FSV 2031/2032) - the system rejects it. Take finished results
 into account and do not repeat a change that did not work.
+
+DHW HEATING
+The section "DHW HEATING IN THE LAST 7 DAYS" and the columns "DHW min" (hourly table) and "DHW n/min" (daily summaries) show when the 3-way
+valve was heating the hot water tank. During that time the compressor does not heat the rooms: do not attribute run%, starts, Hz and kWh from
+hours with DHW heating to space heating, and a short drop or slower rise of room temperatures during DHW heating is no reason to change the curve.
 
 WINDOWS, DOORS AND SEASON
 The input has a section "WINDOWS AND DOORS (season: winter or summer)" (open windows and doors from Home Assistant, minutes open over 24 h)
@@ -689,6 +699,34 @@ def okna_of(c, s):
         return None
 
 
+def tuv_of(cfg, s):
+    """(počet, minúty) ohrevov TÚV za deň zo súhrnu; staršie uložené súhrny ich nemajú -> dopočíta sa z udalostí ventilu."""
+    if "tuv_n" in s:
+        return s.get("tuv_n"), s.get("tuv_min")
+    try:
+        a, b = day_bounds(str(s.get("date"))[:10])
+        tv = dhw_intervals(cfg, a, b)
+        return len(tv), int(round(sum(e - x for x, e in tv) / 60.0))
+    except Exception:
+        return None, None
+
+
+def dhw_text(cfg, now, days=7, lang="sk"):
+    """Ohrevy TÚV za posledných `days` dní po dňoch: „16.11.: 04:34–05:16 (42 min), …“ (z 3-cestného ventilu)."""
+    if not _TUV:
+        return _p("dhw_none", lang)
+    a = local_midnight(int(now)) - (days - 1) * 86400
+    by_day = {}
+    for s, e in dhw_intervals(cfg, a, int(now) + 60):
+        by_day.setdefault(time.strftime("%d.%m.", time.localtime(s)), []).append(
+            "%s–%s (%d min)" % (time.strftime("%H:%M", time.localtime(s)), time.strftime("%H:%M", time.localtime(e)), round((e - s) / 60.0)))
+    out = []
+    for i in range(days):
+        d = time.strftime("%d.%m.", time.localtime(a + i * 86400 + 3 * 3600))
+        out.append("%s: %s" % (d, ", ".join(by_day.get(d, [])) or "-"))
+    return "\n".join(out)
+
+
 def days_text(cfg, c, n=14, with_today=True, lang="sk"):
     rows = [json.loads(r[0]) for r in c.execute("SELECT data FROM days ORDER BY date DESC LIMIT ?", (n,))][::-1]
     if with_today:
@@ -706,7 +744,8 @@ def days_text(cfg, c, n=14, with_today=True, lang="sk"):
             fmt(s.get("dt_beh")), fmt(s.get("posun"), 2), "%s/%s" % (s.get("hod_pod_cielom"), s.get("hod_nad_cielom")),
             str(s.get("hod_posun_na_maxime")), str(s.get("hod_dt_vysoka")),
             "%s/%s%s" % (fmt(s.get("fsv2031"), 0), fmt(s.get("fsv2032"), 0),
-                         i18n.tn("srv.prompt.eod_changes", s["zmien_nastaveni"], lang) if s.get("zmien_nastaveni") else ""), fmt(s.get("fsv4013"), 0), fmt(s.get("max_posun")), fmt(s.get("ciel_izba")), fmt(okna_of(c, s), 0)]))
+                         i18n.tn("srv.prompt.eod_changes", s["zmien_nastaveni"], lang) if s.get("zmien_nastaveni") else ""), fmt(s.get("fsv4013"), 0), fmt(s.get("max_posun")), fmt(s.get("ciel_izba")), fmt(okna_of(c, s), 0),
+            "%s/%s" % tuple("-" if v is None else str(v) for v in tuv_of(cfg, s))]))
     return "\n".join(out), len(rows)
 
 
@@ -891,7 +930,7 @@ def build_input(cfg, c, now, reasons=None, pre=None):
             time.strftime("%d.%m. %H", time.localtime(h["ts"])), fmt(h.get("vonku")),
             *[fmt(h.get(k)) for k in ROOMS], fmt(h.get("wl")), fmt(h.get("tw2")), fmt(h.get("dt_beh")),
             fmt(h.get("beh"), 0), fmt(h.get("starty"), 0), fmt(h.get("f_avg"), 0), fmt(h.get("posun")),
-            fmt(h.get("kwh"), 2), fmt(h.get("bojler")), fmt(okna.get(h["ts"]), 0)]))
+            fmt(h.get("kwh"), 2), fmt(h.get("bojler")), fmt(h.get("tuv_min"), 0), fmt(okna.get(h["ts"]), 0)]))
     last_sample = int((tcq(cfg, "SELECT v FROM meta WHERE k='last_sample'") or [[0]])[0][0] or 0)
     ev = tcq(cfg, "SELECT ts, kind, entity, old, new, text FROM events WHERE ts>=? AND kind IN "
                   "('chyba','ovladanie','nastavenie','tarifa','system') ORDER BY ts DESC LIMIT 25", (int(now) - 6 * 3600,))
@@ -930,6 +969,7 @@ def build_input(cfg, c, now, reasons=None, pre=None):
         "\n".join("- %s: %s" % (k, v) for k, v in cur.items()),
         "", _p("h_24h", ml),
         "\n".join(lines),
+        "", _p("h_dhw", ml), dhw_text(cfg, now, 7, ml),
         "", _p("h_events", ml), "\n".join(evl) or _p("ziadne", ml),
         "", _p("h_forecast", ml), "\n".join(forecast(cfg, ml) or [_p("no_location", ml)]),
         "", _p("h_days", ml, ref=REF_NAME),
@@ -1781,4 +1821,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()

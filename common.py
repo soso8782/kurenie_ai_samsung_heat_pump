@@ -215,7 +215,43 @@ def hour_stats(cfg, a, b):
             d["starty"] = x["starts"]
             d["f_avg"] = round(x["f"] / x["run"], 1) if x["run"] else 0
             d["dt_beh"] = round(sum(x["dt"]) / len(x["dt"]), 1) if x["dt"] else None
+    # ohrev TÚV: minúty, keď bol 3-cestný ventil na bojleri (Tank); vtedy beh a kWh nepatria kúreniu
+    for s, e in dhw_intervals(cfg, a, b):
+        for h in range(max(0, int((s - a) // 3600)), min(n, int((e - 1 - a) // 3600) + 1)):
+            lo, hi = max(s, a + h * 3600), min(e, a + (h + 1) * 3600)
+            if hi > lo:
+                hours[h]["tuv_min"] = hours[h].get("tuv_min", 0) + (hi - lo) / 60.0
+    for d in hours:
+        if d.get("n"):
+            d["tuv_min"] = int(round(d.get("tuv_min", 0)))
     return hours
+
+
+DHW_MIN_S = 120   # kratšie prepnutie ventilu na bojler (test ventilu, zákmit) sa nepočíta ako ohrev
+
+
+def dhw_intervals(cfg, a, b):
+    """Ohrevy TÚV v [a, b) z udalostí 3-cestného ventilu: [(od, do)], ventil na bojleri (hodnota obsahuje „Tank“).
+    Prebiehajúci ohrev končí poslednou vzorkou + 60 s; úseky kratšie ako DHW_MIN_S sa vynechajú. Bez entity ventilu []."""
+    ent = profil.device_entity("ventil", P)
+    if not ent:
+        return []
+    try:
+        r = tcq(cfg, "SELECT new FROM events WHERE entity=? AND ts<? ORDER BY ts DESC LIMIT 1", (ent, a))
+        evs = tcq(cfg, "SELECT ts, new FROM events WHERE entity=? AND ts>=? AND ts<? ORDER BY ts", (ent, a, b))
+        last = int((tcq(cfg, "SELECT v FROM meta WHERE k='last_sample'") or [[0]])[0][0] or 0)
+    except Exception:
+        return []
+    out, start = [], (a if r and "Tank" in str(r[0][0] or "") else None)
+    for ts, new in evs:
+        tank = "Tank" in str(new or "")
+        if tank and start is None:
+            start = ts
+        elif not tank and start is not None:
+            out.append((start, ts)); start = None
+    if start is not None:
+        out.append((start, min(b, max(start, last + 60))))
+    return [(s, e) for s, e in out if e - s >= DHW_MIN_S]
 
 
 SETTINGS = profil.settings_map(P)
@@ -252,6 +288,8 @@ def day_summary(cfg, a, b, hours=None):
              kwh=round(sum(h.get("kwh") or 0 for h in hours), 2),
              beh=round(sum(h["beh"] for h in hh) / len(hh)) if hh else None,
              starty=sum(h.get("starty") or 0 for h in hours), hodin_s_datami=len([h for h in hours if h.get("n")]))
+    tv = dhw_intervals(cfg, a, b)
+    s["tuv_n"], s["tuv_min"] = len(tv), int(round(sum(e - x for x, e in tv) / 60.0))
     names = list(SETTINGS.values())
     # nastavenia: hodnota na KONCI dňa (priemer by pri zmene počas dňa dal neexistujúcu hodnotu) + počet zmien v dni
     for k, nme in SETTINGS.items():

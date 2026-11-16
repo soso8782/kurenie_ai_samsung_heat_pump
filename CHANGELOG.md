@@ -2,6 +2,14 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.8.0] – 2026-11-16
+
+### Pridané
+- **Ohrev TÚV vo vstupe AI agenta:** `common.dhw_intervals()` z udalostí 3-cestného ventilu (Tank = TÚV, úseky < 2 min sa
+  nepočítajú); hodinová tabuľka má stĺpec „TÚV min“, nová sekcia „OHREVY TÚV ZA 7 DNÍ“ (časy od–do), denné súhrny „TÚV n/min“
+  (pre staršie uložené dni sa dopočíta). Prompt agenta (sk/en): beh, štarty a kWh počas ohrevu TÚV nepatria kúreniu.
+- Testy ohrevov TÚV v `test_prevadzka.py`; slovenský snapshot vstupu agenta zámerne aktualizovaný.
+
 ## [2.7.0] – 2026-11-16
 
 ### Pridané
@@ -139,6 +147,7 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.8.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.8.0
 [2.7.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.7.0
 [2.6.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.6.0
 [2.5.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.5.0

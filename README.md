@@ -10,7 +10,7 @@ If this project saves you money or time, you can buy me a coffee via PayPal or K
 [![Version](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=version&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Current version: 2.7.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
+**Current version: 2.8.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
 
 A home system that collects data from a **Samsung EHS** heat pump (via the NASA bus and ESPHome), calculates actual energy
 consumption and COP, monitors room temperatures and uses a language model (via [OpenRouter](https://openrouter.ai)) to
