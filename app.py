@@ -83,6 +83,45 @@ def enrich_actions(c, runs):
 RUN_COLS = "id,ts,mode,status,stav,summary,advice,model,actions,error,tok_in,tok_out,cost"
 
 
+def prevadzka(cfg, now=None):
+    """Čo tepelné čerpadlo práve robí (štítok vedľa loga): {"rezim": "kurenie"|"tuv"|"odmrazovanie"|"stoji"|None, "od": ts|None}.
+    Kompresor podľa frekvencie v poslednej vzorke, smer z udalostí 3-cestného ventilu (Tank = TÚV, Room = kúrenie),
+    odmrazovanie z udalostí. Pri starých dátach (zberač ticho > 10 min) alebo chybe vráti rezim None."""
+    now = int(now or time.time())
+    out = {"rezim": None, "od": None}
+    try:
+        ls = int(dict(tcq(cfg, "SELECT k, v FROM meta")).get("last_sample") or 0)
+        if not ls or now - ls > 600:
+            return out
+        r = tcq(cfg, "SELECT value FROM samples WHERE ts=? AND entity=?", (ls, S.get("freq", "")))
+        hz = float(r[0][0]) if r and r[0][0] is not None else None
+
+        def last_ev(key):
+            ent = profil.device_entity(key)
+            if not ent:
+                return None, None
+            r = tcq(cfg, "SELECT new, ts FROM events WHERE entity=? ORDER BY ts DESC LIMIT 1", (ent,))
+            return (str(r[0][0] or ""), int(r[0][1])) if r else (None, None)
+        ventil, v_ts = last_ev("ventil")
+        odmraz, o_ts = last_ev("odmrazovanie")
+        if odmraz and odmraz.strip().upper() == "ON":
+            out.update(rezim="odmrazovanie", od=o_ts)
+        elif hz is None:
+            return out
+        elif hz <= 0:
+            r = tcq(cfg, "SELECT max(ts) FROM samples WHERE entity=? AND value>0 AND ts>?", (S.get("freq", ""), now - 86400))
+            out.update(rezim="stoji", od=int(r[0][0]) + 60 if r and r[0][0] else None)
+        else:
+            tuv = bool(ventil) and "Tank" in ventil
+            r = tcq(cfg, "SELECT max(ts) FROM samples WHERE entity=? AND value<=0 AND ts>?", (S.get("freq", ""), now - 86400))
+            start = int(r[0][0]) + 60 if r and r[0][0] else None
+            od = max(x for x in (start, v_ts) if x) if (start or v_ts) else None
+            out.update(rezim="tuv" if tuv else "kurenie", od=od)
+    except Exception:
+        return {"rezim": None, "od": None}
+    return out
+
+
 def status(cfg, role="admin", email=None, lang="sk"):
     if role != "admin":
         return status_user(cfg, role, email, lang)
@@ -151,6 +190,7 @@ def status(cfg, role="admin", email=None, lang="sk"):
         out["collector_error"] = str(e)
     out["stats"] = stats_brief(cfg, lang)
     out["profil_info"] = profil_info(cfg)
+    out["prevadzka"] = prevadzka(cfg, now)
     try:
         ca = adb(cfg)
         try:
@@ -195,6 +235,7 @@ def status_user(cfg, role, email, lang="sk"):
     finally:
         c.close()
     out["profil_info"] = profil_info(cfg)
+    out["prevadzka"] = prevadzka(cfg, now)
     out["current"] = {}
     try:
         ls = int(dict(tcq(cfg, "SELECT k, v FROM meta")).get("last_sample") or 0)

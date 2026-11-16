@@ -59,6 +59,17 @@ a{color:var(--copper-ink);text-decoration:none}a:hover{text-decoration:underline
 .mark .mt.t-ok{color:var(--good-ink)}
 .mark .mt.t-low{color:color-mix(in srgb,var(--cool) 78%,var(--ink))}
 .mark .mt.t-high{color:var(--crit-ink)}
+/* štítok vedľa loga: čo tepelné čerpadlo práve robí (kúrenie / ohrev TÚV / odmrazovanie / stojí) */
+.mode{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px 0 8px;border-radius:13px;border:1px solid var(--line);font:600 12.5px/1 var(--f-body);letter-spacing:.01em;white-space:nowrap;flex:none}
+.mode[hidden]{display:none}
+.mode svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mode.m-kurenie{color:var(--copper-ink);background:var(--copper-soft);border-color:color-mix(in srgb,var(--copper) 38%,transparent)}
+.mode.m-tuv{color:color-mix(in srgb,var(--cool) 82%,var(--ink));background:color-mix(in srgb,var(--cool) 13%,transparent);border-color:color-mix(in srgb,var(--cool) 38%,transparent)}
+.mode.m-odmrazovanie{color:var(--ink-2);background:color-mix(in srgb,var(--cool) 7%,transparent);border-color:var(--line-2)}
+.mode.m-stoji{color:var(--mut);background:var(--panel-2)}
+.mode.m-kurenie svg,.mode.m-tuv svg{animation:modepulse 2.4s ease-in-out infinite}
+@keyframes modepulse{50%{opacity:.55}}
+@media (max-width:640px){.mode .ml{display:none}.mode{padding:0 5px;width:26px;justify-content:center}}
 /* upozornenia na zariadení */
 .pushbox .prow{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
 .pushbox .pmsg{font-size:13.5px;margin-top:8px;min-height:1.2em}
@@ -610,7 +621,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
 </head>
 <body>
 <header class="top" id="apptop" hidden><div class="wrap">
-  <div class="brand"><span class="mark" id="mark" role="img" aria-label="– °C" title="– °C"><span class="mt" id="marktxt" aria-hidden="true">–</span></span><span class="bt" data-i18n="spolocne.nazov_app">Samsung Heat Pump AI Control</span></div>
+  <div class="brand"><span class="mark" id="mark" role="img" aria-label="– °C" title="– °C"><span class="mt" id="marktxt" aria-hidden="true">–</span></span><span class="bt" data-i18n="spolocne.nazov_app">Samsung Heat Pump AI Control</span><span class="mode" id="modepill" role="status" hidden></span></div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Sekcie" data-i18n-attr="aria-label:nav.sekcie">
     <a role="tab" id="tabl-prehlad" href="#prehlad" aria-controls="tab-prehlad" aria-selected="false"><span class="tl" data-l="Prehľad" data-i18n="nav.prehlad">Prehľad</span><span class="tbadge dot" id="bd-prehlad" hidden title="Aktívne poplachy" role="img" aria-label="Aktívne poplachy" data-i18n-attr="title:nav.poplachy;aria-label:nav.poplachy"></span></a>
     <a role="tab" id="tabl-spotreba" href="#spotreba" aria-controls="tab-spotreba" aria-selected="false"><span class="tl" data-l="Spotreba" data-i18n="nav.spotreba">Spotreba</span></a>
@@ -1873,7 +1884,25 @@ function renderHero(s) {
   $("#delta").textContent = det != null && ciel != null ? (Math.abs(det - ciel) < .05 ? t("prehlad.delta_presne", {c: f(ciel)}) : t("prehlad.delta_voci", {s: det > ciel ? "+" : "−", d: f(Math.abs(det - ciel)), c: f(ciel)})) : t("prehlad.ciel_pomlcka");
   $("#out").textContent = f(g("Vonkajšia teplota")) + " °C";
   renderMark(det, ciel);
+  renderMode(s.prevadzka);
   drawScale();
+}
+/* štítok režimu vedľa loga (z /api/status → prevadzka) */
+const MODE_ICON = {
+  kurenie: '<path d="M12 3c.8 3.2 4.8 5.3 4.8 9.8a4.8 4.8 0 0 1-9.6 0c0-2.4 1.3-3.9 2.4-5.4.3 1.5 1.1 2.5 2.4 2.9-.2-2.8-.8-5.2 0-7.3z"/>',
+  tuv: '<path d="M12 3.5c2.9 3.7 5.8 7 5.8 10.2a5.8 5.8 0 0 1-11.6 0c0-3.2 2.9-6.5 5.8-10.2z"/><path d="M9.6 14.2a2.5 2.5 0 0 0 2.4 2.4"/>',
+  odmrazovanie: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.5 4.5 12 6l2.5-1.5M9.5 19.5 12 18l2.5 1.5"/>',
+  stoji: '<circle cx="12" cy="12" r="8.5"/><path d="M10 9v6M14 9v6"/>'};
+function renderMode(p) {
+  const el = $("#modepill"); if (!el) return;
+  const r = p && p.rezim;
+  if (!r || !MODE_ICON[r]) { el.hidden = true; return; }
+  const label = t("top.rezim_" + r);
+  const od = p.od ? t("top.rezim_od", {t: new Date(p.od * 1000).toLocaleTimeString(LOCALE, {hour: "2-digit", minute: "2-digit"})}) : "";
+  el.className = "mode m-" + r; el.hidden = false;
+  el.title = t("top.rezim_title", {r: label}) + od;
+  el.setAttribute("aria-label", el.title);
+  el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${MODE_ICON[r]}</svg><span class="ml">${esc(label)}</span>`;
 }
 /* logo: číslo = aktuálna teplota detskej, farba podľa odchýlky od cieľa; rovnaké číslo ide do favicony a do odznaku na ikone aplikácie */
 const MARK_HEX = {ok: "#5fd35f", low: "#6fa8f5", high: "#f07a7a", none: "#a7aebb"};

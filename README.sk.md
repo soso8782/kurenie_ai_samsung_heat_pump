@@ -10,7 +10,7 @@ Ak ti projekt šetrí peniaze alebo čas, môžeš ma podporiť kávou cez PayPa
 [![Verzia](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=verzia&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Aktuálna verzia: 2.6.0** (16. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
+**Aktuálna verzia: 2.7.0** (16. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
 
 Domáci systém, ktorý zbiera dáta z tepelného čerpadla **Samsung EHS** (cez NASA zbernicu a ESPHome), počíta skutočnú spotrebu
 a COP, sleduje teploty v izbách a pomocou jazykového modelu (cez [OpenRouter](https://openrouter.ai)) **radí alebo priamo

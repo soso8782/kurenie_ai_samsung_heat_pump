@@ -2,6 +2,13 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.7.0] – 2026-11-16
+
+### Pridané
+- **Štítok režimu vedľa loga:** Kúrenie / Ohrev TÚV / Odmrazovanie / Stojí, s časom od kedy (v popise). Určuje sa z frekvencie
+  kompresora a z udalostí 3-cestného ventilu a odmrazovania; pri starých dátach (> 10 min) sa skryje. `/api/status` →
+  `prevadzka` ({`rezim`, `od`}) pre všetky roly. `test_prevadzka.py`.
+
 ## [2.6.0] – 2026-11-16
 
 ### Pridané
@@ -132,6 +139,7 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.7.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.7.0
 [2.6.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.6.0
 [2.5.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.5.0
 [2.4.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.4.0
