@@ -106,8 +106,8 @@ def setup(api_token, hostname, emails, no_access=False, log=None, lang="sk"):
             log.append(tr("srv.cftunnel.log_access_existuje", lang, host=hostname))
         else:
             created = call(api_token, "POST", "/accounts/%s/access/apps" % account_id,
-                           {"name": "Kúrenie", "domain": hostname, "type": "self_hosted", "session_duration": "24h",
-                            "policies": [{"name": POLICY_NAME, "decision": "allow", "include": [{"email": {"email": e}} for e in emails]}]})
+                           {"name": tr("srv.cftunnel.app_name", lang), "domain": hostname, "type": "self_hosted", "session_duration": "24h",
+                            "policies": [{"name": tr("srv.cftunnel.policy_name", lang), "decision": "allow", "include": [{"email": {"email": e}} for e in emails]}]})
             app_id = (created or {}).get("id")
             aud = (created or {}).get("aud")
             log.append(tr("srv.cftunnel.log_access_povolene", lang, emails=", ".join(emails)))
@@ -177,11 +177,12 @@ def sync_emails(api_token, account_id, app_id, emails, lang="sk"):
     app = call(api_token, "GET", "%s/apps/%s" % (base, app_id)) or {}
     pols = [p for p in (app.get("policies") or []) if isinstance(p, dict)]
     allow = [p for p in pols if p.get("decision") == "allow"]
-    pick = next((p for p in allow if p.get("name") == POLICY_NAME), allow[0] if allow else None)
+    pick = next((p for p in allow if p.get("name") in (POLICY_NAME, tr("srv.cftunnel.policy_name", lang))), allow[0] if allow else None)
     if pick is None:
+        pname = tr("srv.cftunnel.policy_name", lang)
         call(api_token, "POST", "%s/apps/%s/policies" % (base, app_id),
-             {"name": POLICY_NAME, "decision": "allow", "include": include})
-        return tr("srv.cftunnel.pravidlo_vytvorene", lang, name=POLICY_NAME, n=len(emails))
+             {"name": pname, "decision": "allow", "include": include})
+        return tr("srv.cftunnel.pravidlo_vytvorene", lang, name=pname, n=len(emails))
     body = {k: pick[k] for k in _POLICY_KEYS if k in pick}
     body["include"] = include
     pid = pick.get("id")

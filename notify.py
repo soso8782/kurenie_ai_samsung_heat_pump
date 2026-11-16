@@ -36,11 +36,11 @@ _vapid_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------- VAPID kľúče
-def vapid_keys():
+def vapid_keys(lang="sk"):
     """(súkromný, verejný) VAPID kľúč z ROOT/vapid.json; pri prvom použití sa vygeneruje (práva 600).
     Existujúci poškodený súbor sa NEprepíše (zmena kľúča by zneplatnila všetky predplatné) - vyhodí RuntimeError."""
     if webpush is None:
-        raise RuntimeError("Web Push nie je dostupný (chýba python3-cryptography).")
+        raise RuntimeError(tr("srv.notify.vapid_lib", lang))
     with _vapid_lock:
         if os.path.exists(VAPID_FILE):
             try:
@@ -50,7 +50,7 @@ def vapid_keys():
                     return d["private"], d["public"]
             except (OSError, ValueError, AttributeError):
                 pass
-            raise RuntimeError("Súbor vapid.json je poškodený.")
+            raise RuntimeError(tr("srv.notify.vapid_bad", lang))
         priv, pub = webpush.generate_vapid()
         tmp = VAPID_FILE + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -253,13 +253,28 @@ def push_targets(c, kind=None, email=False):
     return out[:PUSH_MAX_TARGETS]
 
 
-def push_deliver(cfg, c, targets, payload, total_timeout=PUSH_TOTAL_TIMEOUT):
+_WP_ERRS = ((re.compile(r"^payload je prilis dlhy \(max (\d+) bajtov\)$"), "wp_payload", "n"), (re.compile(r"^neplatny endpoint$"), "wp_endpoint", None),
+            (re.compile(r"^chyba push sluzby \(HTTP (\d+)\)$"), "wp_service", "code"), (re.compile(r"^chyba: (.*)$"), "wp_error", "e"))
+
+
+def _wp_err(err, lang="sk"):
+    """Chyba z webpush.send (ASCII slovenčina) -> text v jazyku `lang` (sk bez zmeny)."""
+    if lang == "sk" or not isinstance(err, str):
+        return err
+    for rx, key, var in _WP_ERRS:
+        m = rx.match(err)
+        if m:
+            return tr("srv.notify." + key, lang, **({var: m.group(1)} if var else {}))
+    return err
+
+
+def push_deliver(cfg, c, targets, payload, total_timeout=PUSH_TOTAL_TIMEOUT, lang="sk"):
     """Odošle payload na zariadenia (paralelne, celkovo najviac ~total_timeout s). 404/410 = predplatné sa zmaže, iné chyby sa
     uložia do last_err. Vracia (počet_ok, [chyby]). Nikdy nevyhodí výnimku."""
     if not targets:
         return 0, []
     try:
-        priv, pub = vapid_keys()
+        priv, pub = vapid_keys(lang)
     except Exception as e:
         return 0, [_clean_err("Web Push: %s" % e)]
     subj = vapid_subject(cfg)
@@ -284,7 +299,7 @@ def push_deliver(cfg, c, targets, payload, total_timeout=PUSH_TOTAL_TIMEOUT):
     for t in targets:
         r = results.get(t["endpoint"])
         if r is None:
-            errs.append("push: odpoveď neprišla včas")
+            errs.append(tr("srv.notify.push_timeout", lang))
             continue
         code, err = r
         if code in (200, 201, 202):
@@ -292,9 +307,9 @@ def push_deliver(cfg, c, targets, payload, total_timeout=PUSH_TOTAL_TIMEOUT):
             c.execute("UPDATE push_subs SET last_ok=?, last_err=NULL WHERE endpoint=?", (now, t["endpoint"]))
         elif code in (404, 410):
             c.execute("DELETE FROM push_subs WHERE endpoint=?", (t["endpoint"],))
-            errs.append("push: zariadenie zaniklo (odstránené)")
+            errs.append(tr("srv.notify.push_gone", lang))
         else:
-            txt = _clean_err("%s%s" % ("%s: " % code if code else "", err or "chyba"), t)
+            txt = _clean_err("%s%s" % ("%s: " % code if code else "", _wp_err(err, lang) or tr("srv.notify.push_err", lang)), t)
             c.execute("UPDATE push_subs SET last_err=? WHERE endpoint=?", (txt, t["endpoint"]))
             errs.append("push: " + txt)
     c.commit()
@@ -312,7 +327,7 @@ def push_test(cfg, c, email, lang="sk"):
         print("[DRY_RUN] skúšobný push na %d zariadení" % len(targets), flush=True)
         return 200, {"ok": True, "dry": True, "devices": len(targets), "sent": 0,
                      "note": tr("srv.notify.dry_nic", lang)}
-    n, errs = push_deliver(cfg, c, targets, push_payload(cfg, tr("srv.notify.skuska_titul", lang), tr("srv.notify.skuska_text", lang), "test"))
+    n, errs = push_deliver(cfg, c, targets, push_payload(cfg, tr("srv.notify.skuska_titul", lang), tr("srv.notify.skuska_text", lang), "test"), lang=lang)
     out = {"ok": n > 0, "devices": len(targets), "sent": n}
     if n == 0:
         out["error"] = errs[0] if errs else tr("srv.notify.odoslanie_zlyhalo", lang)
@@ -374,7 +389,7 @@ def send(cfg, title, message, kind, cooldown_s=0):
                 except Exception as e:
                     errs.append("webhook: %s: %s" % (type(e).__name__, e))
             if targets:
-                n, perrs = push_deliver(cfg, c, targets, push_payload(cfg, title, message, kind))
+                n, perrs = push_deliver(cfg, c, targets, push_payload(cfg, title, message, kind), lang=i18n.home_lang(cfg))
                 oks += 1 if n else 0
                 errs += perrs
             ok = oks > 0

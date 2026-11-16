@@ -140,9 +140,12 @@ def make_delta(before, after):
 def direction(text):
     """+1 / -1 / 0: kam sa podľa textu zásahu očakáva pohyb teploty (viac / menej tepla)."""
     t = (text or "").lower()
-    down = ("priškrt", "priskrt", "zavr", "ubral", "zníž", "zniz", "menej", "znížil", "prikr")
-    up = ("pootvor", "otvor", "zvýš", "zvys", "pridal", "viac", "zapol")
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:°c|c)?\s*(?:->|→|na)\s*(\d+(?:[.,]\d+)?)", t)
+    down = ("priškrt", "priskrt", "zavr", "ubral", "zníž", "zniz", "menej", "znížil", "prikr",
+            "throttl", "closed", "reduc", "lowered", "turned down", "decreas", "less", "shut")      # + angličtina (UI_LANG=en)
+    up = ("pootvor", "otvor", "zvýš", "zvys", "pridal", "viac", "zapol",
+          "open", "increas", "raised", "turned up", "added", "more", "switched on", "turned on")
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:°c|c)?\s*(?:->|→|na)\s*(\d+(?:[.,]\d+)?)", t) or \
+        re.search(r"(\d+(?:[.,]\d+)?)\s*(?:°c|c)?\s+to\s+(\d+(?:[.,]\d+)?)", t)
     if m:
         a, b = float(m.group(1).replace(",", ".")), float(m.group(2).replace(",", "."))
         if b != a:
@@ -299,19 +302,31 @@ def scan_settings(cfg, c, now=None):
 
 # ---------------------------------------------------------------- vstup pre model
 
-def llm_text(c, now=None):
-    """Sekcia „ZÁSAHY A ICH VÝSLEDKY“: čakajúce zásahy a hotové vyhodnotenia za 14 dní."""
+def kind_label(kind, lang="sk"):
+    """Druh zásahu (ventil, krivka, ...) pre vstup modelu / zobrazenie; sk = pôvodný interný názov."""
+    key = "srv.interventions.kind_" + str(kind)
+    v = tr(key, lang)
+    return str(kind) if v == key else v
+
+
+def status_label(status, lang="sk"):
+    key = "srv.interventions.status_" + str(status)
+    v = tr(key, lang)
+    return str(status) if v == key else v
+
+
+def llm_text(c, now=None, lang="sk"):
+    """Sekcia „ZÁSAHY A ICH VÝSLEDKY“: čakajúce zásahy a hotové vyhodnotenia za 14 dní (v jazyku modelu `lang`)."""
     now = int(now or time.time())
     out = []
     for r in c.execute("SELECT %s FROM interventions WHERE status='caka' ORDER BY ts" % COLS).fetchall():
         iv = row_dict(r)
-        out.append("ČAKÁ na vyhodnotenie (o %s): %s %s%s – %s [%s]" % (
-            time.strftime("%d.%m. %H:%M", time.localtime(iv["due_ts"])), time.strftime("%d.%m. %H:%M", time.localtime(iv["ts"])),
-            iv["kind"], (" (" + ROOM_NAMES.get(iv["room"], iv["room"]) + ")") if iv["room"] else "", iv["text"], iv["source"]))
+        out.append(tr("srv.prompt.iv_pending", lang, due=time.strftime("%d.%m. %H:%M", time.localtime(iv["due_ts"])),
+                      ts=time.strftime("%d.%m. %H:%M", time.localtime(iv["ts"])), kind=kind_label(iv["kind"], lang),
+                      room=(" (" + ROOM_NAMES.get(iv["room"], iv["room"]) + ")") if iv["room"] else "", text=iv["text"], src=iv["source"]))
     for r in c.execute("SELECT %s FROM interventions WHERE status='hotove' AND due_ts>=? ORDER BY ts" % COLS, (now - 14 * 86400,)).fetchall():
         iv = row_dict(r)
         vt = (iv["result"] or {}).get("verdict_text", "")
-        out.append("HOTOVÉ: %s %s%s – %s => %s" % (
-            time.strftime("%d.%m. %H:%M", time.localtime(iv["ts"])), iv["kind"],
-            (" (" + ROOM_NAMES.get(iv["room"], iv["room"]) + ")") if iv["room"] else "", iv["text"], vt))
-    return "\n".join(out) or "(žiadne)"
+        out.append(tr("srv.prompt.iv_done", lang, ts=time.strftime("%d.%m. %H:%M", time.localtime(iv["ts"])), kind=kind_label(iv["kind"], lang),
+                      room=(" (" + ROOM_NAMES.get(iv["room"], iv["room"]) + ")") if iv["room"] else "", text=iv["text"], verdict=vt))
+    return "\n".join(out) or tr("srv.prompt.ziadne", lang)

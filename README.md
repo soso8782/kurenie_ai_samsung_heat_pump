@@ -1,40 +1,47 @@
-# Kúrenie AI – inteligentné riadenie tepelného čerpadla Samsung EHS
+# Kúrenie AI – smart control for Samsung EHS heat pumps
 
-[![Verzia](https://img.shields.io/github/v/tag/soso8782/kurenie_ai_samsung_heat_pump?label=verzia&sort=semver)](https://github.com/soso8782/kurenie_ai_samsung_heat_pump/tags)
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
+
+[![Version](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=version&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Aktuálna verzia: 2.2.0** (15. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
+**Current version: 2.4.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
 
-Domáci systém, ktorý zbiera dáta z tepelného čerpadla **Samsung EHS** (cez NASA zbernicu a ESPHome), počíta skutočnú spotrebu
-a COP, sleduje teploty v izbách a pomocou jazykového modelu (cez [OpenRouter](https://openrouter.ai)) **radí alebo priamo
-nastavuje ekvitermickú krivku** v bezpečných mantineloch. Všetko beží na malom Linux kontajneri (LXC), iba so štandardnou
-knižnicou Pythonu 3 – žiadne pip balíčky.
+A home system that collects data from a **Samsung EHS** heat pump (via the NASA bus and ESPHome), calculates actual energy
+consumption and COP, monitors room temperatures and uses a language model (via [OpenRouter](https://openrouter.ai)) to
+**advise on or directly adjust the heating curve** (weather compensation curve) within safe limits. Everything runs on a small
+Linux container (LXC) using only the Python 3 standard library – no pip packages.
 
-> *English summary:* Self-hosted monitoring and AI-assisted control for a Samsung EHS air-to-water heat pump. A collector reads
-> the unit via an ESPHome bridge on the Samsung NASA bus, a pure-stdlib Python web app shows rooms, hot water, energy, COP and
-> costs, and an LLM agent (via OpenRouter) adjusts the weather-compensation curve within hard safety limits. UI is in Slovak.
+The web UI, notifications and the AI agent are available in **Slovak and English**. The web UI language is switched with the
+SK/EN switch in the top bar; the language of notifications and of the agent is set with `UI_LANG` in `config.env` or in the
+web UI under Settings → "Language of notifications and the agent". *Slovak documentation: [README.sk.md](README.sk.md).*
 
-## Čo to vie
+## Features
 
-- **Prehľad v reálnom čase** – teplota vody (výstup/spiatočka, ΔT), kompresor, odmrazovanie, 3-cestný ventil, TÚV, chybové kódy.
-- **Izby** – teploty z Home Assistant (Zigbee/ESPHome čidlá), cieľové minimá, detail izby s grafom, otvorené okná/dvere.
-- **Ako kúri podľa vonku** – nastavenie krivky (FSV 2011/2012/2021/2022/2031/2032/4013, posun, zosilnenie), história zmien FSV,
-  graf a tabuľka skutočnej teploty vody pri danej vonkajšej teplote (len minúty, keď naozaj kúri do radiátorov) a min/max
-  teploty izieb podľa vonkajšej teploty.
-- **Spotreba a cena** – denná spotreba celého domu (z elektromera / portálu distribúcie) a tepelného čerpadla, odhad ceny podľa
-  cenníka (DD5, VT/NT, mesačná platba, adresná energopomoc), mesačné súhrny, fakturačné obdobie.
-- **Presný výpočet COP** – tepelný výkon z prietoku a ΔT (prietok kalibrovaný podľa tabuliek výrobcu), príkon kalibrovaný
-  na nočnú spotrebu domu; denné/týždenné/mesačné/ročné COP.
-- **Home Assistant integrácia** – senzory cez MQTT discovery (príkon, spotreba, teplo, COP, obdobia), externé štatistiky
-  do Energy panelu (spotreba domu, náklady, čerpadlo).
-- **AI agent** – každú hodinu (alebo pri udalosti) vyhodnotí stav, predpoveď počasia a históriu; v režime *Radí* len odporúča,
-  v režime *Riadi* mení povolené nastavenia. Denné „učenie“ z predošlých dní, správy agentovi, týždenné súhrny, A/B test.
-- **TÚV** – plánovač a manuálny ohrev teplej vody.
-- **Upozornenia** – Web Push (PWA na iPhone/Android) a HA webhook: chyba TČ, dohrev, okno otvorené pri kúrení, kredit, …
-- **Prihlásenie** – heslo pre správcu, voliteľne Cloudflare Tunnel + Access (overenie JWT), role admin/user.
-- **Štatistiky** – hodinová databáza, cykly kompresora, poruchy, porovnania, export.
+- **Real-time overview** – water temperature (flow/return, ΔT), compressor, defrost, 3-way valve, DHW, error codes.
+- **Rooms** – temperatures from Home Assistant (Zigbee/ESPHome sensors), minimum target temperatures, room detail with a chart,
+  open windows/doors.
+- **How it heats by outdoor temperature** – heating curve settings (FSV 2011/2012/2021/2022/2031/2032/4013, curve offset, gain),
+  FSV change history, a chart and table of the actual water temperature at a given outdoor temperature (only minutes when the
+  unit is really heating the radiators), and the min/max room temperatures by outdoor temperature.
+- **Consumption and cost** – daily consumption of the whole house (from the electricity meter / distributor portal) and of the
+  heat pump, cost estimate based on the tariff (DD5, high/low tariff, monthly fee, targeted energy aid), monthly summaries,
+  billing period.
+- **Accurate COP calculation** – heat output from flow rate and ΔT (flow rate calibrated against the manufacturer's tables),
+  power input calibrated against the house's night-time consumption; daily/weekly/monthly/yearly COP.
+- **Home Assistant integration** – sensors via MQTT discovery (power input, consumption, heat, COP, periods), external statistics
+  for the Energy dashboard (house consumption, cost, heat pump). A separate integration (entities, agent control) lives in its
+  own repository, see [Home Assistant integration](#home-assistant-integration).
+- **AI agent** – evaluates the state, the weather forecast and the history every hour (or on an event); in *Advise only* mode it
+  just makes recommendations, in *Control* mode it changes the allowed settings. Daily "learning" from previous days, messages
+  to the agent, weekly summaries, A/B test.
+- **DHW** – scheduler and manual boost of domestic hot water.
+- **Notifications** – Web Push (PWA on iPhone/Android) and an HA webhook: heat pump error, backup heater, window open while
+  heating, credit, …
+- **Login** – administrator password, optionally Cloudflare Tunnel + Access (JWT verification), admin/user roles.
+- **Statistics** – hourly database, compressor cycles, faults, comparisons, export.
 
-## Architektúra
+## Architecture
 
 ```
 Samsung EHS ──NASA bus──> ESPHome (M5Stack Atom, m5stack-tc) ──REST/SSE──> collector.py ──> tc.db (minútové vzorky)
@@ -45,107 +52,125 @@ Home Assistant (izby, kontakty, elektromer) <──WS/REST/MQTT──> agent.py 
                                                                    └──> app.py + ui.html  (web/PWA, port 80)
 ```
 
-| Súbor | Účel |
+(Diagram labels: minútové vzorky = one-minute samples, izby = rooms, kontakty = contacts, elektromer = electricity meter,
+hodinové = hourly.)
+
+| File | Purpose |
 |---|---|
-| `collector.py` | zberač z ESP (SSE + REST, každú minútu) do `tc.db` |
-| `agent.py` | hodinový beh agenta, mantinely, učenie, upozornenia, MQTT publikovanie |
-| `app.py`, `ui.html`, `sw.js` | webový server (http.server) a jednostránková aplikácia / PWA |
-| `stats.py`, `stats_ui.js/css`, `stats_backfill.py` | hodinové štatistiky, COP, kalibrácia, import histórie z HA |
-| `spotreba.py`, `ha_cost.py` | denná spotreba a cena, cenníky, import do HA štatistík |
-| `vonku.py` | „Ako kúri podľa vonku“ – krivka, voda a izby podľa vonkajšej teploty |
-| `ha_pub.py` | senzory pre Home Assistant cez MQTT discovery |
-| `ha_ws.py` | minimálny WebSocket klient pre Home Assistant |
-| `contacts.py`, `contacts_mqtt.py`, `temps.py` | okenné/dverné kontakty a teplotné čidlá |
-| `dhw.py` | teplá úžitková voda (plánovač, manuálny ohrev) |
-| `interventions.py`, `abtest.py` | zásahy (ventily…) s vyhodnotením, A/B test nastavení |
-| `notify.py`, `webpush.py` | upozornenia (HA webhook, Web Push s VAPID) |
-| `cftunnel.py`, `cfjwt.py` | Cloudflare Tunnel a overovanie Cloudflare Access JWT |
-| `locales/sk.json`, `locales/en.json` | texty webového rozhrania (slovenčina, angličtina); nový jazyk = nový súbor s rovnakými kľúčmi |
-| `profil.py`, `profil.example.json`, `modely/` | profil inštalácie (zariadenie, entity, izby, mantinely) a knižnica modelov |
-| `esphome/`, `docs/` | vzorová konfigurácia ESPHome a dokumentácia profilu |
-| `monitor/` | pôvodný jednoduchý monitor (port 8099) |
-| `SPEC*.md` | návrhy jednotlivých funkcií |
-| `test_*.py`, `t_*.py` | testy (unittest) |
+| `collector.py` | collector from the ESP (SSE + REST, every minute) into `tc.db` |
+| `agent.py` | hourly agent run, safety limits, learning, notifications, MQTT publishing |
+| `app.py`, `ui.html`, `sw.js` | web server (http.server) and single-page app / PWA |
+| `stats.py`, `stats_ui.js/css`, `stats_backfill.py` | hourly statistics, COP, calibration, history import from HA |
+| `spotreba.py`, `ha_cost.py` | daily consumption and cost, tariffs, import into HA statistics |
+| `vonku.py` | "How it heats by outdoor temperature" – curve, water and rooms by outdoor temperature |
+| `ha_pub.py` | sensors for Home Assistant via MQTT discovery |
+| `ha_ws.py` | minimal WebSocket client for Home Assistant |
+| `contacts.py`, `contacts_mqtt.py`, `temps.py` | window/door contacts and temperature sensors |
+| `dhw.py` | domestic hot water (scheduler, manual boost) |
+| `interventions.py`, `abtest.py` | interventions (valves…) with evaluation, A/B test of settings |
+| `notify.py`, `webpush.py` | notifications (HA webhook, Web Push with VAPID) |
+| `cftunnel.py`, `cfjwt.py` | Cloudflare Tunnel and Cloudflare Access JWT verification |
+| `locales/sk.json`, `locales/en.json` | web UI texts (Slovak, English); a new language = a new file with the same keys |
+| `profil.py`, `profil.example.json`, `modely/` | installation profile (device, entities, rooms, limits) and the model library |
+| `esphome/`, `docs/` | sample ESPHome configuration and profile documentation |
+| `monitor/` | the original simple monitor (port 8099) |
+| `SPEC*.md` | design notes for individual features |
+| `test_*.py`, `t_*.py` | tests (unittest) |
 
-## Požiadavky
+## Requirements
 
-- Tepelné čerpadlo Samsung EHS (testované: Split gen. J, AE120JXEDGH + hydrobox AE160JNYDGH, 2018, R410A).
-- ESPHome most na NASA zbernici, napr. M5Stack Atom s komponentom
-  [`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa) a `web_server` (REST + SSE).
-  Názvy entít, ktoré kód očakáva, sú v profile (`profil.json`, predvolené v `profil.py`); vzorový YAML je v `esphome/samsung-ehs.yaml`.
-- Linux (Debian 12/13 LXC stačí), Python 3.11+, systemd. Žiadne ďalšie balíčky.
-- Voliteľne: Home Assistant (izby, kontakty, elektromer, Energy panel), MQTT broker, OpenRouter kľúč, Cloudflare účet.
+- Samsung EHS heat pump (tested: Split gen. J, AE120JXEDGH + hydro unit AE160JNYDGH, 2018, R410A).
+- An ESPHome bridge on the NASA bus, e.g. an M5Stack Atom with the
+  [`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa) component and `web_server` (REST + SSE).
+  The entity names the code expects are in the profile (`profil.json`, defaults in `profil.py`); a sample YAML is in `esphome/samsung-ehs.yaml`.
+- Linux (a Debian 12/13 LXC is enough), Python 3.11+, systemd. No additional packages.
+- Optional: Home Assistant (rooms, contacts, electricity meter, Energy dashboard), an MQTT broker, an OpenRouter key, a Cloudflare account.
 
-## Inštalácia
+## Installation
 
 ```bash
-git clone https://github.com/soso8782/kurenie_ai_samsung_heat_pump.git /opt/kurenie
+git clone https://github.com/soso8782/samsung_heat_pump-ai-control.git /opt/kurenie
 cd /opt/kurenie
 cp config.env.example config.env && chmod 600 config.env
-nano config.env          # ESP_URL, LAT/LON, prípadne HA_URL, NOTIFY_URL …
-sh install.sh            # vytvorí a spustí systemd služby kurenie-collector/-web/-agent/-monitor
+nano config.env          # ESP_URL, LAT/LON, optionally HA_URL, NOTIFY_URL …
+sh install.sh            # creates and starts the systemd services kurenie-collector/-web/-agent/-monitor
 ```
 
-Potom otvor `http://<ip-kontajnera>/`, nastav heslo správcu a v **Nastaveniach** vlož kľúč OpenRouter, token Home Assistant,
-MQTT a pod. Tieto tajomstvá sa ukladajú len lokálne do `config.env` (chmod 600) a späť sa nezobrazujú.
+Then open `http://<container-ip>/`, set the administrator password and, in **Settings**, enter the OpenRouter key, the
+Home Assistant token, MQTT and so on. These secrets are stored only locally in `config.env` (chmod 600) and are never shown again.
 
-Denná záloha databáz: `systemd/kurenie-backup.service` + `.timer` (spúšťa `backup.sh`). Vzorové jednotky sú v `systemd/`.
+Daily database backup: `systemd/kurenie-backup.service` + `.timer` (runs `backup.sh`). Sample units are in `systemd/`.
 
-Testy:
+Tests:
 
 ```bash
 python3 -m unittest test_cop test_spotreba test_vonku test_mqtt
 ```
 
-## Bezpečnosť a mantinely
+## Home Assistant integration
 
-- Agent smie meniť len nastavenia zo zoznamu `ALLOWED` v `agent.py` (napr. FSV 2031 42–50 °C, FSV 2032 32–38 °C, FSV 4013,
-  maximálny kladný posun krivky) a len o malý krok za 12–24 h, nanajvýš 2 zmeny na beh, nikdy pri chybe TČ alebo starých dátach.
-- `DRY_RUN=1` – nič sa neodošle do ESP ani na webhooky (len log).
-- V repozitári nie sú žiadne kľúče, tokeny ani databázy (`.gitignore`). `config.env`, `cf_token`, `vapid.json`, `*.db`
-  a história spotreby zostávajú len na serveri.
+The Home Assistant integration (a device with entities for monitoring and for controlling the agent) is no longer developed in
+this repository but in its own: **[samsung_heat_pump-ai-control-home-assistant-integration](https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration)**.
 
-## Prispôsobenie
+- Install it through **HACS → Custom repositories** using the URL of that second repository (not this one).
+- It requires Kúrenie AI app **version 2.3.0 or newer**.
+- The key is created in the app: **Settings → Home Assistant integration → Create key**.
 
-Inštalačne špecifické veci (izby, názvy entít v ESP, typ kúrenia, mantinely agenta, zdroje histórie z HA, model zariadenia)
-sú od verzie 2.0 v **profile** (`profil.json`), nie v kóde – pozri [docs/PROFIL.md](docs/PROFIL.md) a sekciu
-[Iné tepelné čerpadlo / vlastný dom](#iné-tepelné-čerpadlo--vlastný-dom). Zvyšok:
-ID elektromera (`ENERGY_EXT_ID`, `ENERGY_METER_IDS` v `ha_ws.py` alebo pole `elektrina` v profile),
-cenníky `TARIFF` v `ha_cost.py` (cenník SSE/SSD na Slovensku) a adresa ESP (`ESP_URL` v `config.env`).
+See the integration's README for the full procedure. Sensors for the Energy dashboard (consumption, COP) are still published
+by this app via MQTT (`ha_pub.py`).
 
-## Iné tepelné čerpadlo / vlastný dom
+## Safety and limits
 
-Aplikáciu možno nasadiť aj na iné Samsung EHS (Mono/Split, iný výkon, iné izby, podlahové kúrenie) bez úprav kódu:
+- The agent may only change settings from the `ALLOWED` list in `agent.py` (e.g. FSV 2031 42–50 °C, FSV 2032 32–38 °C, FSV 4013,
+  maximum positive curve offset), and only by a small step per 12–24 h, at most 2 changes per run, never during a heat pump
+  error or with stale data.
+- `DRY_RUN=1` – nothing is sent to the ESP or to webhooks (log only).
+- The repository contains no keys, tokens or databases (`.gitignore`). `config.env`, `cf_token`, `vapid.json`, `*.db` and the
+  consumption history stay on the server only.
 
-1. **ESPHome most** – použi [`esphome/samsung-ehs.yaml`](esphome/samsung-ehs.yaml) (názvy entít sú rovnaké ako v predvolenom
-   profile; zapojenie a nahratie popisuje [`esphome/README.md`](esphome/README.md)). Čísla niektorých NASA správ treba doplniť
-   podľa modelu (riadky `TODO`).
-2. **Profil** – v Nastaveniach → **Zariadenie a dom** (len správca) prejdi 4 krokmi: zariadenie, entity ESP, izby, mantinely.
-   Sprievodca načíta entity z ESP a teplotné senzory z HA a navrhne priradenie. Po uložení reštartuj služby.
-   Súbor `profil.json` môžeš upraviť aj ručne – vzor je [`profil.example.json`](profil.example.json), popis položiek
-   v [docs/PROFIL.md](docs/PROFIL.md). Bez `profil.json` platí pôvodná inštalácia (Samsung AE120JXEDGH, radiátory, 7 izieb).
-3. **Model zariadenia** – v `modely/` sú tabuľky výkonu a príkonu (Maximum Heating Capacity, Peak) z dokumentácie výrobcu
-   pre 31 modelov Samsung EHS:
+## Customization
 
-   | Rad | Modely (vonkajšia jednotka) |
+Installation-specific things (rooms, entity names in the ESP, heating type, agent limits, history sources from HA, device model)
+have been in the **profile** (`profil.json`) rather than in the code since version 2.0 – see [docs/PROFIL.md](docs/PROFIL.md)
+and the section [Other heat pump / your own house](#other-heat-pump--your-own-house). The rest:
+the electricity meter IDs (`ENERGY_EXT_ID`, `ENERGY_METER_IDS` in `ha_ws.py`, or the `elektrina` field in the profile),
+the `TARIFF` price lists in `ha_cost.py` (SSE/SSD tariffs in Slovakia) and the ESP address (`ESP_URL` in `config.env`).
+
+## Other heat pump / your own house
+
+The app can also be deployed on another Samsung EHS (Mono/Split, different capacity, different rooms, underfloor heating)
+without changing the code:
+
+1. **ESPHome bridge** – use [`esphome/samsung-ehs.yaml`](esphome/samsung-ehs.yaml) (entity names match the default profile;
+   wiring and flashing are described in [`esphome/README.md`](esphome/README.md)). Some NASA message numbers have to be filled
+   in for your model (the `TODO` lines).
+2. **Profile** – in Settings → **Device and home** (admin only) go through 4 steps: device, ESP entities, rooms, limits.
+   The wizard loads the entities from the ESP and the temperature sensors from HA and proposes a mapping. Restart the services
+   after saving. You can also edit `profil.json` by hand – the template is [`profil.example.json`](profil.example.json), the
+   fields are described in [docs/PROFIL.md](docs/PROFIL.md). Without `profil.json` the original installation applies
+   (Samsung AE120JXEDGH, radiators, 7 rooms).
+3. **Device model** – `modely/` contains the capacity and power input tables (Maximum Heating Capacity, Peak) from the
+   manufacturer's documentation for 31 Samsung EHS models:
+
+   | Series | Models (outdoor unit) |
    |---|---|
    | Split R410A (gen. J) | `AE040/060JXEDEH`, `AE090/120/140/160JXEDGH` |
    | Split R32 | `AE040/060RXEDEG`, `AE090RXEDEG/GG` |
    | Mono R32 | `AE050RXYDEG`, `AE080/120/160RXYDEG/GG` |
    | Mono R290 | `AE050CXYDEK`, `AE080/120/160CXYDEK/GK` |
-   | Mono R290 so zabudovaným čerpadlom | `AE050CXYBEK`, `AE080/120/160CXYBEK/GK` |
+   | Mono R290 with integrated pump | `AE050CXYBEK`, `AE080/120/160CXYBEK/GK` |
 
-   Overený na reálnom zariadení je len `AE120JXEDGH`, ostatné majú `"overene": false` a presný zdroj (dokument a URL)
-   v poli `zdroj`. Mono HT Quiet (`AE…BXYD…`) zatiaľ chýba. Ako pridať ďalší model: [docs/MODELY.md](docs/MODELY.md).
-   Pre model bez tabuľky COP funguje, ak je k dispozícii
-   prietok zo senzora alebo z konfigurácie (`STATS_FLOW_LPM`); inak sa tepelný výkon a COP nezobrazia.
-4. **Mantinely** – predvolené hranice agenta sa prispôsobia typu kúrenia (radiátory / podlahové / kombinované) a profil ich
-   môže len zúžiť v rámci pevných absolútnych hraníc.
+   Only `AE120JXEDGH` has been verified on a real unit; the others have `"overene": false` and the exact source (document and
+   URL) in the `zdroj` field. Mono HT Quiet (`AE…BXYD…`) is still missing. How to add another model: [docs/MODELY.md](docs/MODELY.md).
+   For a model without a table, COP works if a flow rate is available from a sensor or from the configuration
+   (`STATS_FLOW_LPM`); otherwise heat output and COP are not shown.
+4. **Limits** – the agent's default limits adapt to the heating type (radiators / underfloor / combined), and the profile can
+   only narrow them within fixed absolute limits.
 
-Funkcie, ktoré pre tvoju inštaláciu nie sú k dispozícii (TÚV, Home Assistant, agent bez kľúča OpenRouter, spotreba domu,
-COP bez tabuľky), sa v aplikácii skryjú namiesto chýb.
+Features that are not available for your installation (DHW, Home Assistant, the agent without an OpenRouter key, house
+consumption, COP without a table) are hidden in the app instead of showing errors.
 
-## Upozornenie
+## Disclaimer
 
-Projekt je hobby, bez záruky. Zmeny nastavení tepelného čerpadla robíš na vlastnú zodpovednosť – začni v režime *Radí*
-alebo s `DRY_RUN=1`.
+This project is a hobby, with no warranty. You change the heat pump settings at your own risk – start in *Advise only* mode
+or with `DRY_RUN=1`.

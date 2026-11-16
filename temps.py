@@ -53,6 +53,13 @@ _UNSET = object()
 
 # ---------------------------------------------------------------- predvolené zaradenie
 
+def kind_name(kind, lang="sk"):
+    """Názov druhu čidla v jazyku `lang` (sk = KIND_NAME)."""
+    if lang == "sk" or kind not in KIND_NAME:
+        return KIND_NAME.get(kind, kind)
+    return tr("srv.temps.kind_" + kind, lang)
+
+
 def default_kind(eid, name, in_room_group):
     blob = norm(eid) + " " + norm(name)
     for kind, kws in KIND_RULES:
@@ -324,7 +331,7 @@ def tree(c, now=None):
 def api_state(cfg, c, now=None, lang="sk"):
     now = int(now or time.time())
     return {"notify_min": notify_min(c), "ha": status(cfg, c, now, lang), "kinds": [{"key": k, "name": n if lang == "sk" else tr("srv.temps.kind_" + k, lang)} for k, n in KINDS],
-            "groups": tree(c, now), "other_group_id": contacts.other_id(c)}
+            "groups": [dict(g, name=contacts.group_label(g["name"], lang)) for g in tree(c, now)], "other_group_id": contacts.other_id(c)}
 
 
 def move_group(c, from_gid, to_gid):
@@ -433,32 +440,33 @@ def llm_text(cfg, c, now=None):
     en = _enabled_rows(c, now)
     if not en:
         return None
+    ml = i18n.home_lang(cfg)
+    T = lambda key, **kw: tr("srv.prompt.ts_" + key, ml, **kw)
+    N = lambda v: i18n.dec(sk(v), ml)
     gmap = {g["id"]: g for g in contacts.groups(c)}
     oid = contacts.other_id(c)
-    lines = ["TEPLOTNÉ ČIDLÁ Z HOME ASSISTANTU (vybral majiteľ):",
-             "Doplnok k izbovým teplotám zo zberača. Druh: izba = vzduch v miestnosti; radiátor = hlavica pri radiátore (NIE je teplota izby, "
-             "ukazuje viac); vonku; voda = vykurovacia voda, bojler, čerpadlo; technické = čipy a spotrebiče; iné."]
+    lines = [T("head"), T("intro")]
     by = {}
     for d in en:
         by.setdefault(d["group_id"] if d["group_id"] in gmap else oid, []).append(d)
     for gid in sorted(by, key=lambda g: (gmap[g]["sort"], g)):
-        lines.append("%s:" % gmap[gid]["name"])
+        lines.append("%s:" % contacts.group_label(gmap[gid]["name"], ml))
         for d in by[gid][:60]:
-            kind = KIND_NAME.get(d["kind"], d["kind"]).split(" (")[0].lower()
+            kind = kind_name(d["kind"], ml).split(" (")[0].lower()
             if d["available"]:
-                txt = "teraz %s °C" % sk(d["value"])
+                txt = T("now", v=N(d["value"]))
             else:
-                txt = "nedostupné (od %s)" % time.strftime("%d.%m. %H:%M", time.localtime(d["updated"] or now))
+                txt = T("unavail", t=time.strftime("%d.%m. %H:%M", time.localtime(d["updated"] or now)))
             if d["avg24"] is not None:
-                txt += "; 24 h Ø %s (min %s / max %s)" % (sk(d["avg24"]), sk(d["min24"]), sk(d["max24"]))
+                txt += T("avg24", a=N(d["avg24"]), mn=N(d["min24"]), mx=N(d["max24"]))
             ch = change_3h(c, d["entity_id"], d["value"], now)
             if ch is not None:
-                txt += "; za 3 h %s%s °C" % ("+" if ch > 0 else "", sk(ch))
+                txt += T("ch3", v=("+" if ch > 0 else "") + N(ch))
             if d["note"]:
-                txt += " [poznámka majiteľa: %s]" % d["note"]
+                txt += T("note", v=d["note"])
             lines.append("- %s [%s]: %s" % (d["label"], kind, txt))
     if not status(cfg, c, now)["ok"]:
-        lines.append("Pozor: Home Assistant teraz neodpovedá, hodnoty čidiel nemusia byť aktuálne.")
+        lines.append(T("ha_down"))
     return "\n".join(lines)
 
 
@@ -476,7 +484,7 @@ def day_temps(c, a, b):
     return out
 
 
-def daily_text(c, days, now=None, today=True):
+def daily_text(c, days, now=None, today=True, lang="sk"):
     """Pre učenie a týždenný súhrn: tabuľka „deň | čidlo… “ s Ø (min–max) zapnutých čidiel (najviac 12). None, ak nie sú dáta."""
     now = int(now or time.time())
     en = _enabled_rows(c, now)
@@ -502,13 +510,14 @@ def daily_text(c, days, now=None, today=True):
     if not today:
         dates = [d for d in dates if d != time.strftime("%Y-%m-%d", time.localtime(now))]
     gmap = {g["id"]: g["name"] for g in contacts.groups(c)}
-    head = "deň | " + " | ".join("%s (%s, %s)" % (d["label"], gmap.get(d["group_id"], "?"), KIND_NAME.get(d["kind"], d["kind"]).split(" (")[0].lower()) for d in en)
+    head = tr("srv.prompt.ts_day", lang) + " | " + " | ".join("%s (%s, %s)" % (d["label"], contacts.group_label(gmap.get(d["group_id"], "?"), lang),
+                                                                      kind_name(d["kind"], lang).split(" (")[0].lower()) for d in en)
     out = [head]
     for day in dates:
         cells = []
         for d in en:
             v = allst.get((day, d["entity_id"]))
-            cells.append("-" if not v else "%s (%s–%s)" % (sk(sum(v) / len(v)), sk(min(v)), sk(max(v))))
+            cells.append("-" if not v else "%s (%s–%s)" % (i18n.dec(sk(sum(v) / len(v)), lang), i18n.dec(sk(min(v)), lang), i18n.dec(sk(max(v)), lang)))
         out.append(day + " | " + " | ".join(cells))
     return "\n".join(out)
 
@@ -557,7 +566,7 @@ def check_notifications(cfg, c, now=None):
         if lo is None and hi is None:
             continue
         lab = (alias or "").strip() or hn or eid
-        gn = gname.get(gid) or gname.get(oid)
+        gn = contacts.group_label(gname.get(gid) or gname.get(oid), hl)
         m = mem.get(eid)
         if val is None:                              # nedostupné: krátko počkáme, dlhšie potichu zabudneme
             if m and now - (upd or now) > UNAVAIL_QUIET_S:

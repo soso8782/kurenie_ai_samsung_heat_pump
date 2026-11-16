@@ -429,11 +429,14 @@ class AgentTests(Tmp):
         return seen[0]
 
     def test_chat_prompts_get_language_note(self):
+        # od 2.4.0: sk = slovenský prompt + pokyn jazyka (nezmenené); en = celý anglický prompt (test_en_kompletne.py) + „Reply in English.“
         import agent
-        for role, base in (("user", agent.CHAT_SYSTEM_USER.replace("{email}", "u@x.sk")), ("admin", agent.CHAT_SYSTEM)):
+        for role, base, base_en in (("user", agent.CHAT_SYSTEM_USER.replace("{email}", "u@x.sk"), agent.prompt_for("chat_user", "en", email="u@x.sk")),
+                                    ("admin", agent.CHAT_SYSTEM, agent.prompt_for("chat", "en"))):
             en = self._captured_system(role, "en")
             sk = self._captured_system(role, "sk")
-            self.assertEqual(en, base + "\n\nOdpovedaj v jazyku: English")
+            self.assertEqual(en, base_en)
+            self.assertTrue(en.endswith("\n\nReply in English.") and "Odpovedaj" not in en)
             self.assertEqual(sk, base + "\n\nOdpovedaj v jazyku: slovenčina")
 
     def test_chat_local_texts_by_request_language(self):

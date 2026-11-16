@@ -30,6 +30,7 @@ TEMPLATE = (
 )
 
 OTHER_NAME = "Ostatné"
+_DEFAULT_GROUP_KEYS = {"Ostatné": "ostatne", "Chodba": "chodba"}
 _P = profil.load()
 # predvolené skupiny: izby z profilu (v poradí profilu), potom Chodba a Ostatné; predvolený profil = pôvodné skupiny z v1
 _LEGACY_ORDER = ("obyvacka", "detska", "jedalen", "kuchyna", "spalna", "pracovna", "kupelna")
@@ -74,6 +75,19 @@ def sk(v, nd=1):
 def season(c):
     v = get_state(c, "season", "zima")
     return v if v in SEASONS else "zima"
+
+
+def season_label(c, lang="sk"):
+    """Sezóna (zima / leto) pre text; sk = interná hodnota ako doteraz."""
+    return tr("srv.prompt.season." + season(c), lang)
+
+
+def group_label(name, lang="sk"):
+    """Názov skupiny na zobrazenie: predvolené slovenské názvy „Ostatné“ / „Chodba“ uložené v DB sa pre iný jazyk preložia,
+    názvy zadané používateľom a názvy izieb z profilu ostávajú."""
+    if lang == "sk" or name not in _DEFAULT_GROUP_KEYS:
+        return name
+    return tr("srv.contacts.g_" + _DEFAULT_GROUP_KEYS[name], lang)
 
 
 def _int_state(c, key, default, lo, hi):
@@ -304,7 +318,7 @@ def _set_ha_state(c, ok, error=None, now=None, count=None):
         set_state(c, "ha_error", str(error or "")[:300])
 
 
-def apply_items(c, items, now=None):
+def apply_items(c, items, now=None, lang="sk"):
     """Zapíše stav senzorov z HA do `contacts` a zmeny stavu do `contact_events` (čas = last_changed z HA).
     Senzor, ktorý v zozname chýba, ostane s kľúčom „nedostupné“. Vracia počet nových senzorov."""
     now = int(now or time.time())
@@ -329,7 +343,7 @@ def apply_items(c, items, now=None):
             enabled = default_enabled(c, eid, name, gid)
             note = None
             if eid == KITCHEN_DOOR:
-                enabled, note = 0, KITCHEN_DOOR_NOTE
+                enabled, note = 0, (KITCHEN_DOOR_NOTE if lang == "sk" else tr("srv.contacts.kitchen_note", lang))
             c.execute("INSERT INTO contacts(entity_id, ha_name, alias, group_id, enabled, device_class, state, since, area, note, first_seen, last_seen) "
                       "VALUES(?,?,NULL,?,?,?,?,?,?,?,?,?)", (eid, name, gid, enabled, dc, st, since, area, note, now, now))
             new += 1
@@ -387,7 +401,7 @@ def poll(cfg, c, now=None):
         return {"ok": False, "count": 0, "error": "nenastavené"}
     try:
         items = fetch(cfg)
-        apply_items(c, items, now)
+        apply_items(c, items, now, i18n.home_lang(cfg))
         _set_ha_state(c, True, now=now, count=len(items))
         return {"ok": True, "count": len(items), "error": None}
     except Exception as e:
@@ -714,26 +728,28 @@ def window_log(c, a, b):
 def llm_text(cfg, c, now=None):
     """Sekcia „OKNÁ A DVERE“ pre vstup modelu."""
     now = int(now or time.time())
-    head = "OKNÁ A DVERE (sezóna: %s):" % season(c)
+    ml = i18n.home_lang(cfg)
+    T = lambda key, **kw: tr("srv.prompt.win_" + key, ml, **kw)
+    head = T("head", s=season_label(c, ml))
     if not ha_conf(cfg)[1]:
-        return head + "\nHome Assistant nie je nastavený, o oknách nevieš nič."
+        return head + "\n" + T("no_ha")
     enabled = [d for d in list_contacts(c, now) if d["enabled"]]
     if not enabled:
-        return head + "\n(žiadne zapnuté senzory)"
+        return head + "\n" + T("no_sensors")
     lines = [head]
     op = open_now(c, now)
-    lines.append("Teraz otvorené: " + ("; ".join("%s – %s (%d min)" % (o["group"], o["label"], o["minutes"]) for o in op) if op else "nič"))
+    lines.append(T("open_now") + ("; ".join("%s – %s (%d min)" % (group_label(o["group"], ml), o["label"], o["minutes"]) for o in op) if op else T("nothing")))
     a = now - 24 * 3600
     byg, _byr = open_minutes(c, a, now, now=now)
     cnt = open_counts(c, a, now)
     gnames = {g["id"]: g["name"] for g in groups(c)}
-    parts = ["%s %s min (%d×)" % (gnames.get(gid, "?"), sk(m, 0), cnt.get(gnames.get(gid), 0)) for gid, m in sorted(byg.items(), key=lambda kv: -kv[1])]
-    lines.append("Za posledných 24 h otvorené: " + (", ".join(parts) if parts else "nič"))
+    parts = ["%s %s min (%d×)" % (group_label(gnames.get(gid, "?"), ml), sk(m, 0), cnt.get(gnames.get(gid), 0)) for gid, m in sorted(byg.items(), key=lambda kv: -kv[1])]
+    lines.append(T("last24") + (", ".join(parts) if parts else T("nothing")))
     off = [d["label"] for d in enabled if d["state"] == "unavailable"]
     if off:
-        lines.append("Nedostupné senzory (stav neznámy): " + ", ".join(off))
+        lines.append(T("unavailable") + ", ".join(off))
     if not ha_status(cfg, c)["ok"]:
-        lines.append("Pozor: Home Assistant teraz neodpovedá, údaje o oknách nemusia byť aktuálne.")
+        lines.append(T("ha_down"))
     return "\n".join(lines)
 
 
@@ -791,7 +807,7 @@ def check_notifications(cfg, c, now=None):
         if not en or st != "on" or not since:
             continue
         lab = (alias or "").strip() or hn or eid
-        gn = gname.get(gid) or gname.get(oid)
+        gn = group_label(gname.get(gid) or gname.get(oid), hl)
         mins = max(0, (now - since) // 60)
         thr = gthr.get(gid) or thr_global
         m = mem.get(eid)

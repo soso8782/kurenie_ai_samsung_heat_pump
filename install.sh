@@ -1,12 +1,12 @@
 #!/bin/sh
-# Inštalácia služieb agenta kúrenia na LXC (spúšťať ako root v /opt/kurenie)
+# Installs the heating agent services on an LXC (run as root in /opt/kurenie)
 set -e
 cd /opt/kurenie
 timedatectl set-timezone Europe/Bratislava 2>/dev/null || ln -sf /usr/share/zoneinfo/Europe/Bratislava /etc/localtime
 [ -f config.env ] || cp config.env.example config.env
 chmod 600 config.env
 
-unit() {  # $1 názov, $2 popis, $3 skript, $4 extra Environment
+unit() {  # $1 name, $2 description, $3 script, $4 extra Environment
 cat > /etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2

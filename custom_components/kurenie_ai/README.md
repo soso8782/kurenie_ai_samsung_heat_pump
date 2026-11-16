@@ -1,43 +1,49 @@
-# Kúrenie AI pre Home Assistant
+# Kúrenie AI for Home Assistant
 
-Integrácia pripojí Home Assistant na web aplikáciu **Kúrenie AI** (agent pre tepelné čerpadlo Samsung) a vytvorí jedno zariadenie
-s entitami na sledovanie aj ovládanie. Dáta sa čítajú lokálne (`local_polling`), predvolene každých 30 s.
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
 
-Spotrebu a COP pre panel Energia integrácia neprináša: tie ostávajú na MQTT senzoroch z `ha_pub.py`.
+> **The integration is maintained in a separate repository:**
+> **[samsung_heat_pump-ai-control-home-assistant-integration](https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration)**.
+> Add **its** URL to HACS (not the URL of this repository). The copy in this folder may be out of date.
 
-## Inštalácia
+The integration connects Home Assistant to the **Kúrenie AI** web app (an agent for Samsung heat pumps) and creates one device
+with entities for monitoring and control. Data is read locally (`local_polling`), by default every 30 s.
 
-**Cez HACS (custom repository):**
-1. HACS, menu vpravo hore, Vlastné repozitáre, vlož adresu repozitára `https://github.com/soso8782/kurenie_ai_samsung_heat_pump`, kategória Integrácia.
-2. Nainštaluj „Kúrenie AI“ a reštartuj Home Assistant.
+The integration does not provide consumption and COP for the Energy dashboard: those stay on the MQTT sensors from `ha_pub.py`.
 
-**Ručne:** skopíruj priečinok `custom_components/kurenie_ai` do `config/custom_components/` a reštartuj Home Assistant.
+## Installation
 
-## Nastavenie
+**Via HACS (custom repository):**
+1. HACS, menu at the top right, Custom repositories, enter the repository URL `https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration`, category Integration.
+2. Install "Kúrenie AI" and restart Home Assistant.
 
-1. V aplikácii Kúrenie AI otvor Nastavenia, karta **Integrácia Home Assistant**, a daj **Vytvoriť kľúč**.
-   Kľúč sa zobrazí iba raz, skopíruj si ho. Starý kľúč po vytvorení nového prestane platiť, **Zrušiť kľúč** integráciu odpojí.
-2. V Home Assistante: Nastavenia, Zariadenia a služby, Pridať integráciu, **Kúrenie AI**.
-3. Zadaj adresu aplikácie (napr. `http://10.10.40.30`) a kľúč.
-4. Interval obnovy (15 až 300 s) zmeníš cez tlačidlo Konfigurovať pri integrácii.
-   Ak kľúč zrušíš alebo vymeníš, Home Assistant ponúkne opätovné prihlásenie (reauth).
+**Manually:** copy the `custom_components/kurenie_ai` folder to `config/custom_components/` and restart Home Assistant.
 
-## Entity
+## Setup
 
-Zariadenie „Kúrenie AI – <názov zariadenia>“ (výrobca Samsung).
+1. In the Kúrenie AI app open Settings, the **Home Assistant integration** card, and click **Create key**.
+   The key is shown only once, so copy it. The old key stops working once a new one is created, and **Revoke key** disconnects the integration.
+2. In Home Assistant: Settings, Devices & services, Add integration, **Kúrenie AI**.
+3. Enter the app address (e.g. `http://10.10.40.30`) and the key.
+4. You can change the refresh interval (15 to 300 s) with the Configure button on the integration.
+   If you revoke or replace the key, Home Assistant offers re-authentication (reauth).
 
-| Typ | Entita |
+## Entities
+
+Device "Kúrenie AI – <device name>" (manufacturer Samsung).
+
+| Type | Entity |
 |---|---|
-| sensor | Vonkajšia teplota; teplota každej izby (atribúty `min_target`, `reference`); výstupná teplota vody, spiatočka, cieľová teplota podľa krivky, Delta T; frekvencia kompresora; posun krivky; teplota TÚV (ak je TÚV); chybový kód; stav agenta (ok / pozor / problem); posledné hodnotenie agenta (celý text v atribúte `summary`); poplachy (počet, zoznam v atribúte `alerts`) |
-| binary_sensor | Kompresor beží; odmrazovanie; ohrev TÚV (ak je TÚV); problém (poplach alebo chybový kód ≠ 0); pripojenie ESP, zberača a Home Assistantu |
-| select | Režim agenta (vypnutý / radí / riadi) |
-| number | Cieľová izbová teplota (krok 0,5, rozsah podľa aplikácie) |
-| button | Spustiť agenta teraz; spustiť ohrev TÚV (ak je TÚV) |
+| sensor | Outdoor temperature; temperature of each room (attributes `min_target`, `reference`); flow temperature, return temperature, target temperature from the heating curve, Delta T; compressor frequency; curve offset; DHW temperature (if there is DHW); error code; agent status (ok / pozor / problem); last agent assessment (full text in the `summary` attribute); alerts (count, list in the `alerts` attribute) |
+| binary_sensor | Compressor running; defrost; DHW heating (if there is DHW); problem (alert or error code ≠ 0); connection of the ESP, the collector and Home Assistant |
+| select | Agent mode (off / advises / controls) |
+| number | Target room temperature (step 0.5, range given by the app) |
+| button | Run agent now; start DHW heating (if there is DHW) |
 
-Po každej akcii sa dáta obnovia okamžite. Ak aplikácia akciu odmietne (napr. ohrev TÚV teraz nejde), Home Assistant zobrazí jej správu.
+After each action the data is refreshed immediately. If the app rejects an action (e.g. DHW heating cannot be started now), Home Assistant shows its message.
 
-## Riešenie problémov
+## Troubleshooting
 
-- „Nepodarilo sa pripojiť“: skontroluj adresu a že aplikácia beží; integrácia používa adresu z aplikácie priamo (http alebo https).
-- „Kľúč je neplatný“: vytvor v aplikácii nový kľúč a zadaj ho znova.
-- Podrobné záznamy: `logger: logs: custom_components.kurenie_ai: debug`.
+- "Failed to connect": check the address and that the app is running; the integration uses the address from the app directly (http or https).
+- "Key is invalid": create a new key in the app and enter it again.
+- Detailed logs: `logger: logs: custom_components.kurenie_ai: debug`.

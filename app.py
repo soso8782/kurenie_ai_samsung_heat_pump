@@ -149,7 +149,7 @@ def status(cfg, role="admin", email=None, lang="sk"):
         out["current"] = {e: v for e, v in rows}
     except Exception as e:
         out["collector_error"] = str(e)
-    out["stats"] = stats_brief(cfg)
+    out["stats"] = stats_brief(cfg, lang)
     out["profil_info"] = profil_info(cfg)
     try:
         ca = adb(cfg)
@@ -461,7 +461,7 @@ def user_target_post(cfg, body, email, lang="sk"):
     raz za 30 min, nie počas A/B testu; zdieľa limit s chatom). Vracia {"ok","text","target"}."""
     c = adb(cfg)
     try:
-        ok, text = _agent_mod.chat_room_target(cfg, c, body.get("value"), email or "používateľ", int(time.time()), lang)
+        ok, text = _agent_mod.chat_room_target(cfg, c, body.get("value"), email or tr("srv.agent.user_fallback", lang), int(time.time()), lang)
     except Exception:
         ok, text = False, tr("srv.app.zmena_teploty_chyba", lang)
     finally:
@@ -572,7 +572,7 @@ def tunnel_save(cfg, body, lang="sk"):
     return 200, {"ok": True, "tunnel": tunnel_status(cfg)}
 
 
-def day(cfg, dstr):
+def day(cfg, dstr, lang="sk"):
     a, b = day_bounds(dstr)
     hours = hour_stats(cfg, a, b)
     ev = tcq(cfg, "SELECT ts, kind, entity, old, new, text FROM events WHERE ts>=? AND ts<? ORDER BY ts LIMIT 5000", (a, b))
@@ -585,13 +585,13 @@ def day(cfg, dstr):
     ivs = interventions.list_items(c, 200, a, b)
     okna = []
     try:
-        day_temps = temps.day_temps(c, a, b)
+        day_temps = [dict(x, group=contacts.group_label(x["group"], lang)) for x in temps.day_temps(c, a, b)]
     except Exception:
         day_temps = []
     try:
         for h, x in zip(hours, contacts.hourly_open(c, a, b)):
             h["okna_min"], h["okna_izby"] = x["total"], x["by"]
-        okna = contacts.window_log(c, a, b)
+        okna = [dict(x, group=contacts.group_label(x["group"], lang)) for x in contacts.window_log(c, a, b)]
         okna_day = contacts.window_minutes(c, a, b)
     except Exception:
         okna_day = None
@@ -602,7 +602,7 @@ def day(cfg, dstr):
                 zmeny_agenta=sum(1 for r in runs for x in r["actions"] if x.get("vykonane")))
     return {"date": time.strftime("%Y-%m-%d", time.localtime(a)), "a": a, "b": b, "hours": hours, "summary": summ,
             "day_review": les[0] if les else None, "messages": messages(cfg, a=a, b=b), "okna": okna, "temps": day_temps,
-            "events": [dict(zip(("ts", "kind", "entity", "old", "new", "text"), e)) for e in ev],
+            "events": [dict(zip(("ts", "kind", "entity", "old", "new", "text"), (e[0], e[1], i18n.event_entity(e[2], lang), e[3], e[4], i18n.event_text(e[5], lang) if e[5] else e[5]))) for e in ev],
             "notes": [dict(zip(("ts", "author", "title", "body"), n)) for n in notes], "runs": runs, "interventions": ivs}
 
 
@@ -908,6 +908,7 @@ def mqtt_test(cfg, body, lang="sk"):
 def contacts_get(cfg, c, lang="sk"):
     now = int(time.time())
     gs, ungrouped = contacts.tree(c, now)
+    gs = [dict(g, name=contacts.group_label(g["name"], lang)) for g in gs]    # predvolené skupiny „Ostatné“ / „Chodba“ podľa jazyka
     return {"season": contacts.season(c), "notify_min": contacts.notify_min(c), "repeat_min": contacts.repeat_min(c),
             "ha": contacts.ha_status(cfg, c, lang), "other_group_id": contacts.other_id(c), "groups": gs, "ungrouped": ungrouped}
 
@@ -1025,7 +1026,7 @@ def test_key(cfg, lang="sk"):
     if not cfg["OPENROUTER_API_KEY"]:
         return {"ok": False, "error": tr("srv.app.kluc_nenastaveny", lang)}
     try:
-        txt, tin, tout, cost = call_llm(cfg, "Odpovedz presne týmto JSON: {\"ok\": true}", "test", 2500)
+        txt, tin, tout, cost = call_llm(cfg, tr("srv.prompt.test_key", i18n.home_lang(cfg)), "test", 2500)
         return {"ok": True, "model": cfg["OPENROUTER_MODEL"], "tokens": (tin or 0) + (tout or 0), "cost": cost, "reply": txt[:80]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:400]}
@@ -1236,10 +1237,10 @@ def hdd_base(cfg):
     return cfg_int(cfg, "STATS_HDD_BASE", 18, 10, 25)
 
 
-def stats_brief(cfg):
+def stats_brief(cfg, lang="sk"):
     """Blok `stats` v /api/status: počet hodín s dátami a posledný deň."""
     if stats is None:
-        return {"hours": None, "last_day": None, "error": STATS_NA}
+        return {"hours": None, "last_day": None, "error": tr("srv.app.stats_na", lang)}
     try:
         cov = stats.coverage(cfg)
         return {"hours": cov.get("hours"), "last_day": cov.get("last_day")}
@@ -1637,7 +1638,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, profil_ha_entity(cfg, lang))
             if u.path == "/api/push/key":
                 try:
-                    return self.send(200, {"key": notify.vapid_keys()[1]})
+                    return self.send(200, {"key": notify.vapid_keys(lang)[1]})
                 except Exception as e:
                     print("push: kľúč nie je dostupný (%s)" % type(e).__name__, file=sys.stderr, flush=True)
                     return self.send(503, {"error": tr("srv.app.push_nedostupne", lang)})
@@ -1674,7 +1675,7 @@ class H(BaseHTTPRequestHandler):
                 finally:
                     c.close()
             if u.path == "/api/day":
-                return self.send(200, day(cfg, p.get("d", [""])[0]))
+                return self.send(200, day(cfg, p.get("d", [""])[0], lang))
             if u.path == "/api/messages":
                 return self.send(200, {"messages": messages(cfg)})
             if u.path == "/api/models":
@@ -1859,13 +1860,13 @@ class H(BaseHTTPRequestHandler):
                 code, out = user_target_post(cfg, body, email, lang)
                 return self.send(code, out)
             if u.path == "/api/room_target":
-                code, out = room_target_post(cfg, body, email or "správca", lang)
+                code, out = room_target_post(cfg, body, email or tr("srv.notify.spravca", lang), lang)
                 return self.send(code, out)
             if u.path == "/api/tuv_boost":
-                code, out = tuv_boost_post(cfg, body, email or "správca", lang)
+                code, out = tuv_boost_post(cfg, body, email or tr("srv.notify.spravca", lang), lang)
                 return self.send(code, out)
             if u.path == "/api/tuv_target":
-                code, out = tuv_target_post(cfg, body, email or "správca", lang)
+                code, out = tuv_target_post(cfg, body, email or tr("srv.notify.spravca", lang), lang)
                 return self.send(code, out)
             if u.path == "/api/test_key":
                 return self.send(200, test_key(cfg, lang))
@@ -1986,7 +1987,14 @@ class H(BaseHTTPRequestHandler):
 
     def static_icon(self, path):
         if path == "/manifest.webmanifest":
-            return self.send(200, json.dumps(MANIFEST, ensure_ascii=False), "application/manifest+json; charset=utf-8", cache="public, max-age=86400")
+            m = dict(MANIFEST)
+            try:
+                hl = i18n.home_lang(load_cfg())
+            except Exception:
+                hl = "sk"
+            if hl != "sk":   # názov aplikácie a jazyk PWA podľa jazyka domácnosti (UI_LANG)
+                m.update(name=tr("srv.app.manifest_name", hl), short_name=tr("srv.app.manifest_name", hl), lang=hl)
+            return self.send(200, json.dumps(m, ensure_ascii=False), "application/manifest+json; charset=utf-8", cache="public, max-age=86400")
         fp = os.path.join(ROOT, "assets", STATIC[path])
         if not os.path.isfile(fp):
             return self.send(404, {"error": "not found"})

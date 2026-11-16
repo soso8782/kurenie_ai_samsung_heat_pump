@@ -109,7 +109,7 @@ def build_publish(topic, payload, retain=False):
 def discovery(lang="sk"):
     """Zoznam (topic, JSON) discovery správ pre všetky senzory. Názvy v jazyku domácnosti; unique_id sa nemení."""
     out = []
-    device = DEVICE if lang == "sk" else dict(DEVICE, name=tr("srv.ha_pub.zariadenie", lang), model=tr("srv.ha_pub.model", lang))
+    device = DEVICE if lang == "sk" else dict(DEVICE, name=tr("srv.ha_pub.zariadenie", lang), model=tr("srv.ha_pub.model", lang), manufacturer=tr("srv.ha_pub.vyrobca", lang))
     for key, name, unit, dc, sc, icon, dec in SENSORS:
         if lang != "sk":
             name = tr("srv.ha_pub.n_" + key, lang)

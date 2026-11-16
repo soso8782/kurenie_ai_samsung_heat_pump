@@ -3,10 +3,10 @@
   "name": "Kúrenie AI",
   "codeowners": ["@soso8782"],
   "config_flow": true,
-  "documentation": "https://github.com/soso8782/kurenie_ai_samsung_heat_pump",
+  "documentation": "https://github.com/soso8782/samsung_heat_pump-ai-control",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/soso8782/kurenie_ai_samsung_heat_pump/issues",
+  "issue_tracker": "https://github.com/soso8782/samsung_heat_pump-ai-control/issues",
   "requirements": [],
   "version": "2.3.0"
 }

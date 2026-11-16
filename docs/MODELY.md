@@ -1,30 +1,32 @@
-# Knižnica modelov (`modely/`)
+# Model library (`modely/`)
 
-Každý súbor `modely/<ID>.json` je tabuľka výrobcu **Maximum Heating Capacity (Peak Value)** jednej vonkajšej jednotky:
-vykurovací výkon (HC, kW) a príkon (PI, kW) podľa vonkajšej teploty a teploty výstupnej vody. Aplikácia z nej počíta
-tabuľkový COP a kalibruje prietok okruhov.
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](MODELY.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](MODELY.sk.md)
 
-## Modely v knižnici
+Each `modely/<ID>.json` file is the manufacturer's **Maximum Heating Capacity (Peak Value)** table for one outdoor unit:
+heating capacity (HC, kW) and power input (PI, kW) by outdoor temperature and water flow temperature. The app uses it to calculate
+the table-based COP and to calibrate the circuit flow rate.
 
-| Rad | Modely | Rozsah tabuľky | Zdroj |
+## Models in the library
+
+| Series | Models | Table range | Source |
 |---|---|---|---|
-| Split R410A (gen. J) | AE040JXEDEH, AE060JXEDEH, AE090JXEDGH, **AE120JXEDGH** (overený), AE140JXEDGH, AE160JXEDGH | −20…20 °C vonku, voda 25–55 °C | EHS Split Technical Data Book (Europe) |
-| Split R32 | AE040RXEDEG, AE060RXEDEG, AE090RXEDEG/GG | −20…20 °C, voda 25–55 °C | EHS Split Technical Data Book (Europe) |
-| Mono R32 | AE050RXYDEG, AE080RXYDEG/GG, AE120RXYDEG/GG, AE160RXYDEG/GG | −20…20 °C, voda 30–65 °C | EHS tank integrated Hydro Unit TDB (Mono, R32) |
-| Mono R290 | AE050CXYDEK, AE080CXYDEK/GK, AE120CXYDEK/GK, AE160CXYDEK/GK | −25…35 °C, voda 25–75 °C | EHS Mono R290 TDB |
-| Mono R290 so zabudovaným čerpadlom | AE050CXYBEK, AE080CXYBEK/GK, AE120CXYBEK/GK, AE160CXYBEK/GK | −25…35 °C, voda 25–75 °C | EHS Mono R290 Pump TDB |
+| Split R410A (gen. J) | AE040JXEDEH, AE060JXEDEH, AE090JXEDGH, **AE120JXEDGH** (verified), AE140JXEDGH, AE160JXEDGH | −20…20 °C outdoor, water 25–55 °C | EHS Split Technical Data Book (Europe) |
+| Split R32 | AE040RXEDEG, AE060RXEDEG, AE090RXEDEG/GG | −20…20 °C, water 25–55 °C | EHS Split Technical Data Book (Europe) |
+| Mono R32 | AE050RXYDEG, AE080RXYDEG/GG, AE120RXYDEG/GG, AE160RXYDEG/GG | −20…20 °C, water 30–65 °C | EHS tank integrated Hydro Unit TDB (Mono, R32) |
+| Mono R290 | AE050CXYDEK, AE080CXYDEK/GK, AE120CXYDEK/GK, AE160CXYDEK/GK | −25…35 °C, water 25–75 °C | EHS Mono R290 TDB |
+| Mono R290 with integrated pump | AE050CXYBEK, AE080CXYBEK/GK, AE120CXYBEK/GK, AE160CXYBEK/GK | −25…35 °C, water 25–75 °C | EHS Mono R290 Pump TDB |
 
-Presný názov dokumentu a URL je v poli `zdroj` každého súboru. Čísla boli z PDF vyčítané skriptom (nie prepisované ručne)
-a namátkovo porovnané s textom dokumentu. **Na reálnom zariadení je overený iba AE120JXEDGH** – ostatné majú
-`"overene": false`. Kde výrobca uvádza jednu tabuľku pre 1-fázovú aj 3-fázovú verziu (`AE080RXYD*G`), sú v knižnici dva
-súbory s rovnakými hodnotami (`…EG` a `…GG`).
+The exact document title and URL are in the `zdroj` field of each file. The numbers were extracted from the PDFs by a script
+(not typed by hand) and spot-checked against the text of the document. **Only AE120JXEDGH is verified on a real unit** – the
+others have `"overene": false`. Where the manufacturer gives one table for both the 1-phase and the 3-phase version
+(`AE080RXYD*G`), the library has two files with identical values (`…EG` and `…GG`).
 
-Chýba: Mono HT Quiet (`AE…BXYD…`) – verejne dostupná dátová kniha s čitateľnou tabuľkou sa nenašla.
+Missing: Mono HT Quiet (`AE…BXYD…`) – no publicly available data book with a readable table was found.
 
-## Ako pridať model
+## How to add a model
 
-1. V Samsung **Technical Data Book** k vonkajšej jednotke nájdi kapitolu *Capacity table → Maximum Heating Capacity (Peak Value)*.
-2. Vytvor `modely/<OZNAČENIE>.json` (názov súboru = ID, len písmená, číslice a `- _ .`):
+1. In the Samsung **Technical Data Book** for the outdoor unit, find the chapter *Capacity table → Maximum Heating Capacity (Peak Value)*.
+2. Create `modely/<DESIGNATION>.json` (file name = ID, only letters, digits and `- _ .`):
 
 ```json
 {
@@ -43,10 +45,10 @@ Chýba: Mono HT Quiet (`AE…BXYD…`) – verejne dostupná dátová kniha s č
 }
 ```
 
-   - `ta` = vonkajšie teploty (riadky), `lw` = teploty výstupnej vody (stĺpce), `peak["<ta>"]` = bunky `[HC kW, PI kW]`
-     v poradí `lw`; riadok musí mať presne toľko buniek ako `lw`.
-   - Bunka, ktorú výrobca neuvádza, je `null` (prvá bunka riadku `null` byť nesmie).
-   - Ak je tabuľka vo wattoch, prepočítaj na kW. `typ`: `split` / `mono` / `hydrosplit`.
-3. Over: `python3 -c "import profil; print([m['id'] for m in profil.list_models()])"` – model musí byť v zozname.
-4. Vo webe **Nastavenia → Zariadenie a dom** vyber model, ulož a reštartuj služby.
-5. `"overene": true` nastav až po porovnaní vypočítaného COP so skutočným meraním (elektromer, kalorimeter).
+   - `ta` = outdoor temperatures (rows), `lw` = water flow temperatures (columns), `peak["<ta>"]` = cells `[HC kW, PI kW]`
+     in the order of `lw`; a row must have exactly as many cells as `lw`.
+   - A cell that the manufacturer does not give is `null` (the first cell of a row must not be `null`).
+   - If the table is in watts, convert it to kW. `typ`: `split` / `mono` / `hydrosplit`.
+3. Verify: `python3 -c "import profil; print([m['id'] for m in profil.list_models()])"` – the model must be in the list.
+4. In the web UI, go to **Settings → Device and home**, select the model, save and restart the services.
+5. Set `"overene": true` only after comparing the calculated COP with an actual measurement (electricity meter, heat meter).

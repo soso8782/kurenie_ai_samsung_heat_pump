@@ -5,7 +5,7 @@ V najteplejšom 2-hodinovom okne dňa (10:00-16:00 podľa predpovede) zvýši "C
 na konci okna vráti pôvodnú hodnotu. Jediná entita, ktorú tento modul zapisuje, je "Cieľová teplota TÚV" v rozsahu 40-52 °C.
 Zápis ide VÝLUČNE cez agent.esp_set_number() (ten rešpektuje DRY_RUN). Volá sa z watchdogu každú minútu: tick().
 """
-import json, time, urllib.request
+import json, re, time, urllib.request
 import abtest, notify
 import i18n
 from i18n import tr
@@ -123,6 +123,12 @@ def ensure_window(cfg, c, now=None):
     return w
 
 
+def _result(cfg, good):
+    """Text výsledku zápisu pre actions.result (v jazyku domácnosti)."""
+    hl = i18n.home_lang(cfg)
+    return (tr("srv.dhw.res_dry", hl) if is_dry(cfg) else tr("srv.run.written", hl)) if good else tr("srv.run.unconfirmed_short", hl)
+
+
 def _log_action(c, old, new, reason, applied, result):
     c.execute("INSERT INTO actions(ts, entity, old, new, reason, applied, result) VALUES(?,?,?,?,?,?,?)",
               (int(time.time()), ENT_TARGET, old, new, reason, applied, result))
@@ -132,9 +138,9 @@ def _log_action(c, old, new, reason, applied, result):
 def _write_target(cfg, value):
     """Jediný zápis tohto modulu: cieľ TÚV v rozsahu 40-52 °C cez agent.esp_set_number (DRY_RUN sa rešpektuje tam)."""
     if not ENT_TARGET:
-        raise ValueError("zariadenie nemá TÚV (entita cieľa TÚV nie je v profile)")
+        raise ValueError(tr("srv.dhw.err_bez_tuv", i18n.home_lang(cfg)))
     if not (T_MIN <= value <= T_MAX):
-        raise ValueError("hodnota TÚV %s mimo povoleného rozsahu %s-%s" % (value, T_MIN, T_MAX))
+        raise ValueError(tr("srv.dhw.err_rozsah", i18n.home_lang(cfg), v=value, lo=T_MIN, hi=T_MAX))
     ag = _agent()
     ag.esp_set_number(cfg, ENT_TARGET, "%g" % value)
     if is_dry(cfg):
@@ -185,12 +191,12 @@ def start_boost(cfg, c, w, lang="sk"):
     try:
         good = _write_target(cfg, new)
     except Exception as e:
-        _log_action(c, base, new, REASON_UP, 0, "chyba zápisu: %s" % e)
+        _log_action(c, base, new, tr("srv.dhw.reason_up", i18n.home_lang(cfg)), 0, tr("srv.run.write_err", i18n.home_lang(cfg), e=e))
         set_state(c, "dhw_boosted", "0")
         return tr("srv.dhw.zapis_chyba", lang, err=e)
     set_state(c, "dhw_boosted", "1")    # aj pri nepotvrdenom zápise: na konci okna sa hodnota vráti
-    _log_action(c, base, new, "%s %s-%s" % (REASON_UP, w["start"], w["end"]), 1 if good else 0,
-                ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
+    _log_action(c, base, new, "%s %s-%s" % (tr("srv.dhw.reason_up", i18n.home_lang(cfg)), w["start"], w["end"]), 1 if good else 0,
+                _result(cfg, good))
     return tr("srv.dhw.prihriate", lang, base=base, new=new)
 
 
@@ -207,11 +213,12 @@ def restore(cfg, c, why, lang="sk"):
         raise RuntimeError(tr("srv.dhw.cielovy_precitat_znova", lang))
     if is_dry(cfg) or bv is None or abs(cur - bv) < 1e-6:
         good = _write_target(cfg, base)
-        _log_action(c, bv, base, "%s (%s)" % (REASON_DOWN, why), 1 if good else 0,
-                    ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
+        _log_action(c, bv, base, "%s (%s)" % (tr("srv.dhw.reason_down", i18n.home_lang(cfg)), _why(why, i18n.home_lang(cfg))), 1 if good else 0,
+                    _result(cfg, good))
         res = tr("srv.dhw.vratene", lang, base=base, why=_why(why, lang))
     else:
-        _log_action(c, cur, cur, "%s (%s)" % (REASON_DOWN, why), 0, "hodnotu medzitým zmenil používateľ (%s) - ponechané" % cur)
+        _log_action(c, cur, cur, "%s (%s)" % (tr("srv.dhw.reason_down", i18n.home_lang(cfg)), _why(why, i18n.home_lang(cfg))), 0,
+                    tr("srv.dhw.zmenil_pouzivatel", i18n.home_lang(cfg), cur=cur))
         res = tr("srv.dhw.ponechane", lang, cur=cur)
     set_state(c, "dhw_boosted", "0")
     return res
@@ -219,11 +226,17 @@ def restore(cfg, c, why, lang="sk"):
 
 _WHY = {"zapol sa elektrický dohrev TÚV": "booster", "koniec času ohrevu": "koniec_casu", "bojler dosiahol cieľ": "ciel",
         "plánovač vypnutý": "plan_off", "koniec okna": "koniec_okna"}
+_WHY_WEB = re.compile(r"^zastavené z webu \((.*)\)$", re.S)
 
 
 def _why(why, lang):
-    """dôvod vrátenia cieľa v texte výsledku (do DB sa zapisuje po slovensky)"""
-    if lang == "sk" or why not in _WHY:
+    """dôvod vrátenia cieľa (interná slovenská značka, preklad sa robí pri zápise do DB a v texte výsledku)"""
+    if lang == "sk":
+        return why
+    m = _WHY_WEB.match(why or "")
+    if m:
+        return tr("srv.dhw.why_web", lang, who=m.group(1))
+    if why not in _WHY:
         return why
     return tr("srv.dhw.why_" + _WHY[why], lang)
 
@@ -275,18 +288,17 @@ def manual_start(cfg, c, target, who, now=None, lang="sk"):
     set_state(c, "dhw_boost_value", t)
     set_state(c, "dhw_manual_until", int(now + MANUAL_MAX_S))
     set_state(c, "dhw_manual_last", int(now))
-    reason = "manuálny ohrev TÚV z webu (%s)" % who
+    reason = tr("srv.dhw.reason_manual", i18n.home_lang(cfg), who=who)
     try:
         good = _write_target(cfg, t)
     except Exception as e:
         set_state(c, "dhw_boost_value", old_bv)
         set_state(c, "dhw_manual_until", old_until)
         set_state(c, "dhw_boosted", "1" if was_boosted else "0")
-        _log_action(c, base, t, reason, 0, "chyba zápisu: %s" % e)
+        _log_action(c, base, t, reason, 0, tr("srv.run.write_err", i18n.home_lang(cfg), e=e))
         return False, tr("srv.dhw.zapis_zlyhal", lang, err=e)
     set_state(c, "dhw_boosted", "1")    # aj pri nepotvrdenom zápise: na konci sa hodnota vráti
-    _log_action(c, base, t, reason, 1 if good else 0,
-                ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
+    _log_action(c, base, t, reason, 1 if good else 0, _result(cfg, good))
     text = tr("srv.dhw.spusteny", lang, t=i18n.dec(_fmt(t), lang), until=time.strftime("%H:%M", time.localtime(now + MANUAL_MAX_S)))
     if is_dry(cfg):
         text += tr("srv.dhw.testovacie", lang)
@@ -320,14 +332,13 @@ def set_target_manual(cfg, c, value, who, lang="sk"):
             old = _num(_agent().esp_get(cfg, "number", ENT_TARGET).get("value"))
         except Exception:
             old = None
-    reason = "ručná zmena cieľa TÚV z webu (%s)" % who
+    reason = tr("srv.dhw.reason_set", i18n.home_lang(cfg), who=who)
     try:
         good = _write_target(cfg, v)
     except Exception as e:
-        _log_action(c, old, v, reason, 0, "chyba zápisu: %s" % e)
+        _log_action(c, old, v, reason, 0, tr("srv.run.write_err", i18n.home_lang(cfg), e=e))
         return False, tr("srv.dhw.zapis_zlyhal", lang, err=e)
-    _log_action(c, old, v, reason, 1 if good else 0,
-                ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
+    _log_action(c, old, v, reason, 1 if good else 0, _result(cfg, good))
     if not good:
         return False, tr("srv.dhw.nepotvrdit", lang)
     return True, tr("srv.dhw.ciel_je", lang, v=i18n.dec(_fmt(v), lang))

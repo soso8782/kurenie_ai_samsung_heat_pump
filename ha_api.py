@@ -6,6 +6,8 @@ len SHA-256 kľúča), zostavenie stavu `build_state` z výstupu `app.status(cfg
 Napojenie na HTTP server robí app.py (pozri odovzdanie v SPEC_ha_integracia.md).
 """
 import hashlib, hmac, json, os, secrets, time
+import i18n
+from i18n import tr
 
 API_VERSION = 1
 PATH_STATE = "/api/ha/v1/state"
@@ -203,25 +205,25 @@ ACTIONS = {
 }
 
 
-def validate_action(path, body):
-    """(ok, chyba) – validácia vstupov akcie."""
+def validate_action(path, body, lang="sk"):
+    """(ok, chyba) – validácia vstupov akcie; text chyby v jazyku `lang`."""
     if path not in ACTIONS:
-        return False, "neznáma akcia"
+        return False, tr("srv.ha_api.neznama_akcia", lang)
     if not isinstance(body, dict):
-        return False, "neplatné telo požiadavky"
+        return False, tr("srv.ha_api.neplatne_telo", lang)
     if path.endswith("/mode"):
         if body.get("mode") not in MODES:
-            return False, "neplatný režim"
+            return False, tr("srv.ha_api.neplatny_rezim", lang)
     elif path.endswith("/room_target"):
         v = body.get("value")
         if isinstance(v, bool) or not isinstance(v, (int, float)):
-            return False, "neplatná teplota"
+            return False, tr("srv.ha_api.neplatna_teplota", lang)
         if v != v or not (ROOM_MIN <= v <= ROOM_MAX):
-            return False, "teplota musí byť %g až %g °C" % (ROOM_MIN, ROOM_MAX)
+            return False, tr("srv.ha_api.teplota_rozsah", lang, lo="%g" % ROOM_MIN, hi="%g" % ROOM_MAX)
     elif path.endswith("/tuv_boost"):
         t = body.get("target", TUV_DEFAULT_TARGET)
         if isinstance(t, bool) or not isinstance(t, (int, float)) or not (45 <= t <= 52):
-            return False, "cieľ TÚV musí byť 45 až 52 °C"
+            return False, tr("srv.ha_api.tuv_rozsah", lang)
     return True, None
 
 
@@ -235,7 +237,7 @@ def _mode(cfg, body, who, adb=None):
         old = _get(c, "mode") or "advise"
         _set(c, "mode", m)
         c.execute("INSERT INTO runs(ts,mode,status,stav,summary,actions) VALUES(?,?,?,?,?,?)",
-                  (int(time.time()), m, "info", None, "Režim agenta zmenený cez Home Assistant: %s → %s" % (old, m), "[]"))
+                  (int(time.time()), m, "info", None, tr("srv.ha_api.log_rezim", i18n.home_lang(cfg), old=old, new=m), "[]"))
         c.commit()
         return 200, {"mode": m}
     finally:
@@ -263,9 +265,9 @@ def to_app_body(path, body):
 
 def dispatch(cfg, path, body, app_module, who="home-assistant"):
     """Overí vstup a vykoná akciu. Vracia (http_status, dict). `app_module` = modul app (kvôli room_target_post, tuv_boost_post)."""
-    ok, err = validate_action(path, body)
+    ok, err = validate_action(path, body, i18n.home_lang(cfg))
     if not ok:
-        return (404 if err == "neznáma akcia" else 400), {"error": err}
+        return (404 if path not in ACTIONS else 400), {"error": err}
     name = ACTIONS[path]
     fn = globals()[name] if name.startswith("_") else getattr(app_module, name)
     return fn(cfg, to_app_body(path, body), who)

@@ -15,6 +15,21 @@ try:
 except ImportError:   # zberač spustený samostatne bez ostatných modulov: predvolený dom
     profil = None
     load_cfg = None
+try:
+    import i18n
+except ImportError:
+    i18n = None
+
+
+def _loc(text):
+    """Text udalosti v jazyku domácnosti (UI_LANG v config.env); bez i18n alebo pri chybe ostáva slovensky.
+    Staré slovenské riadky v DB sa pri zobrazení prekladajú (i18n.event_text)."""
+    try:
+        if i18n is not None and load_cfg is not None:
+            return i18n.event_text(text, i18n.home_lang(load_cfg()))
+    except Exception:
+        pass
+    return text
 
 
 def _esp_url():
@@ -101,7 +116,7 @@ def on_freq(c, val):
     else:
         txt = f"STOP (chod {dur:.0f} min, max {comp['max']:.0f} Hz) - {ctx()}"
         comp.update(on=False, since=now, max=0.0)
-    c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)", (now, "kompresor", "Kompresor", None, None, txt))
+    c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)", (now, "kompresor", "Kompresor", None, None, _loc(txt)))
     c.commit()
 
 
@@ -154,7 +169,7 @@ def on_state(c, d):
         c.commit()
     if name == "Chybový kód TČ" and prev is not None and prev[1] != val and val not in (0, None):
         c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)",
-                  (int(time.time()), "chyba", name, str(prev[1]), str(val), "Nenulový chybový kód TČ"))
+                  (int(time.time()), "chyba", name, str(prev[1]), str(val), _loc("Nenulový chybový kód TČ")))
         c.commit()
 
 
@@ -191,7 +206,7 @@ def sampler():
 def stream():
     c = db()
     c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)",
-              (int(time.time()), "system", "zberač", None, None, "Zberač spustený"))
+              (int(time.time()), "system", "zberač", None, None, _loc("Zberač spustený")))
     c.commit()
     online = None
     while not END or time.time() < END:
@@ -200,7 +215,7 @@ def stream():
             with urllib.request.urlopen(req, timeout=90) as r:
                 if online is False:
                     c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)",
-                              (int(time.time()), "system", "ESP", None, None, "ESP znova dostupné"))
+                              (int(time.time()), "system", "ESP", None, None, _loc("ESP znova dostupné")))
                     c.commit()
                 online, ev = True, None
                 # Trvalé spojenie slúži hlavne na logy - ESP po úvodnom výpise
@@ -224,12 +239,12 @@ def stream():
         except Exception as e:  # výpadok ESP / siete
             if online is not False:
                 c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)",
-                          (int(time.time()), "system", "ESP", None, None, f"ESP nedostupné ({type(e).__name__})"))
+                          (int(time.time()), "system", "ESP", None, None, _loc(f"ESP nedostupné ({type(e).__name__})")))
                 c.commit()
             online = False
             time.sleep(10)
     c.execute("INSERT INTO events VALUES(?,?,?,?,?,?)",
-              (int(time.time()), "system", "zberač", None, None, "Zber ukončený (koniec 48 h)"))
+              (int(time.time()), "system", "zberač", None, None, _loc("Zber ukončený (koniec 48 h)")))
     c.commit()
 
 

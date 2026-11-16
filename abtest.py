@@ -158,7 +158,7 @@ def _write_count(cfg, c, st, want, now):
     save(c, st)
     try:
         ok = write_mode(cfg, want)
-        err = "" if ok else "zápis nebol potvrdený"
+        err = "" if ok else tr("srv.abtest.zapis_nepotvrdeny", i18n.home_lang(cfg))
     except Exception as e:
         ok, err = False, ("%s: %s" % (type(e).__name__, e))[:200]
     if ok:
@@ -191,7 +191,7 @@ def sync(cfg, c, st, want, now, urgent=False):
     st["attempts"] = {"date": date_of(now), "n": n}
     save(c, st)
     if n >= MAX_FAILS and active_state(st):
-        stop(cfg, c, "zápis režimu do ESP zlyhal %d-krát (%s)" % (n, txt), now, st=st, notify_user=True)
+        stop(cfg, c, tr("srv.abtest.stop_zapis", i18n.home_lang(cfg), n=n, err=txt), now, st=st, notify_user=True)
         return "test zastavený: zápis zlyhal"
     return "zápis zlyhal (%s), pokus %d z %d" % (txt, n, MAX_FAILS)
 
@@ -293,7 +293,7 @@ def tick(cfg, c, now=None):
     lw = st.get("last_written")
     # ručná zmena selectu (mimo okna prepínania po polnoci): test sa zastaví a režim sa už neprepisuje
     if cur is not None and lw is not None and cur not in (lw, st.get("last_attempt")) and sec_of_day(now) >= SWITCH_WINDOW_S:
-        stop(cfg, c, "režim regulácie zmenený ručne", now, st=st, restore=False, notify_user=True)
+        stop(cfg, c, tr("srv.abtest.stop_rucne", lang), now, st=st, restore=False, notify_user=True)
         return "zastavené: režim zmenený ručne"
     want = entry["mode"] if entry["valid"] else "A"
     urgent = False
@@ -332,10 +332,11 @@ def finish(cfg, c, st, now):
     return "hotovo; " + res
 
 
-def stop(cfg, c, reason="zastavené používateľom", now=None, st=None, restore=True, notify_user=False):
+def stop(cfg, c, reason=None, now=None, st=None, restore=True, notify_user=False):
     """Zastaví test. restore=True -> hneď režim A; restore=False (ručná zmena) -> režim sa neprepisuje. Vracia True, ak sa zastavil."""
     now = int(now or time.time())
     lang = i18n.home_lang(cfg)
+    reason = reason or tr("srv.abtest.stop_pouzivatel", lang)
     st = st if st is not None else load(c)
     if not active_state(st):
         return False
@@ -621,26 +622,24 @@ def status_brief(c, now=None):
     return {"status": st.get("status"), "today_mode": mode, "day_index": idx, "days_total": len(days), "start": st.get("start")}
 
 
-def llm_text(c, now=None):
-    """Sekcia „POROVNÁVACÍ TEST“ pre vstup modelu (None, ak test nebeží)."""
+def llm_text(c, now=None, lang="sk"):
+    """Sekcia „POROVNÁVACÍ TEST“ pre vstup modelu (None, ak test nebeží); texty v jazyku modelu `lang`."""
     now = int(now or time.time())
     st = load(c)
     if not active_state(st):
         return None
+    T = lambda key, **kw: tr("srv.prompt.ab_" + key, lang, **kw)
     days = st.get("days") or []
     e = today_entry(st, now)
     if e is None:
-        head = "Porovnávací test A/B je naplánovaný, začne %s o polnoci (dní: %d)." % (st.get("start"), len(days))
+        head = T("planned", start=st.get("start"), n=len(days))
     else:
         idx = days.index(e) + 1
         if e["mode"] == "B" and e.get("valid"):
-            mode = "B – regulácia podľa izby je ZÁMERNE VYPNUTÁ (v čerpadle je len ekvitermická krivka)"
+            mode = T("mode_b")
         elif e["mode"] == "B":
-            mode = "B bol zrušený poistkou, regulácia podľa izby je znova zapnutá"
+            mode = T("mode_b_off")
         else:
-            mode = "A – regulácia podľa izby je zapnutá ako obvykle"
-        head = "Porovnávací test A/B beží: dnes je deň %d z %d, režim %s." % (idx, len(days), mode)
-    return ("POROVNÁVACÍ TEST:\n" + head + "\nMajiteľ ním meria, koľko energie regulácia podľa izby ušetrí. V dňoch B môže byť v izbách (aj v referenčnej izbe " + REF_NAME + ") "
-            "zámerne teplejšie alebo chladnejšie, ber to ako súčasť testu a nie ako problém. Počas testu nemeň žiadne nastavenia "
-            "(systém ich aj tak odmietne), nenavrhuj zmeny krivky ani ventilov a dôvody typu „referenčná izba mimo cieľa“ či „izba pod "
-            "minimom“ v dňoch B neriešiš. Poplachy (chybový kód, elektrický dohrev) platia ako vždy.")
+            mode = T("mode_a")
+        head = T("running", idx=idx, n=len(days), mode=mode)
+    return T("title") + "\n" + head + "\n" + T("body", ref=REF_NAME)

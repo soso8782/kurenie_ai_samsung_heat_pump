@@ -110,3 +110,56 @@ def dec(num_text, lang=DEFAULT):
 def lang_name(lang):
     """názov jazyka pre pokyn v prompte agenta"""
     return LANG_NAMES.get(lang) or lang
+
+
+# ---------------------------------------------------------------- texty udalostí zberača (tc.db, tabuľka events)
+# Zberač ukladá nové udalosti v jazyku domácnosti (UI_LANG); staré slovenské riadky sa pri zobrazení / pre model prekladajú
+# (aj opačne, ak sa UI_LANG zmenil). START/STOP na začiatku ostáva v oboch jazykoch (SQL `text LIKE 'STOP%'`).
+_EV_FIXED = (("Zberač spustený", "Collector started"), ("ESP znova dostupné", "ESP reachable again"),
+             ("Nenulový chybový kód TČ", "Non-zero heat pump error code"), ("Zber ukončený (koniec 48 h)", "Collection ended (48 h limit)"))
+_EV_CTX = (("vonku ", "outdoor "), (", ventil ", ", valve "), (", termostat ", ", thermostat "), (", odmraz. ", ", defrost "))
+_RE_ESP_SK = re.compile(r"^ESP nedostupné \((.*)\)$")
+_RE_ESP_EN = re.compile(r"^ESP unreachable \((.*)\)$")
+_RE_START_SK = re.compile(r"^START \(pauza (\d+) min\) - (.*)$", re.S)
+_RE_START_EN = re.compile(r"^START \(pause (\d+) min\) - (.*)$", re.S)
+_RE_STOP_SK = re.compile(r"^STOP \(chod (\d+) min, max (\d+) Hz\) - (.*)$", re.S)
+_RE_STOP_EN = re.compile(r"^STOP \(ran (\d+) min, max (\d+) Hz\) - (.*)$", re.S)
+
+
+_EV_ENT = (("zberač", "collector"), ("Kompresor", "Compressor"))
+
+
+def event_entity(name, lang=DEFAULT):
+    """Názov „entity“ udalosti zo zberača (zberač, Kompresor) v jazyku `lang`; ostatné (názvy z ESP) sa nemení."""
+    if lang == "en":
+        return dict(_EV_ENT).get(name, name)
+    if lang == "sk":
+        return {b: a for a, b in _EV_ENT}.get(name, name)
+    return name
+
+
+def _ctx(t, to_en):
+    for a, b in _EV_CTX:
+        t = t.replace(a, b) if to_en else t.replace(b, a)
+    return t
+
+
+def event_text(text, lang=DEFAULT):
+    """Text udalosti zo zberača v jazyku `lang` (sk/en); neznámy text (logy z ESP, názvy) sa nemení."""
+    t = text if isinstance(text, str) else ("" if text is None else str(text))
+    if lang not in ("sk", "en"):
+        return t
+    en = lang == "en"
+    for sk_, en_ in _EV_FIXED:
+        if t == (sk_ if en else en_):
+            return en_ if en else sk_
+    m = (_RE_ESP_SK if en else _RE_ESP_EN).match(t)
+    if m:
+        return ("ESP unreachable (%s)" if en else "ESP nedostupné (%s)") % m.group(1)
+    m = (_RE_START_SK if en else _RE_START_EN).match(t)
+    if m:
+        return ("START (pause %s min) - %s" if en else "START (pauza %s min) - %s") % (m.group(1), _ctx(m.group(2), en))
+    m = (_RE_STOP_SK if en else _RE_STOP_EN).match(t)
+    if m:
+        return ("STOP (ran %s min, max %s Hz) - %s" if en else "STOP (chod %s min, max %s Hz) - %s") % (m.group(1), m.group(2), _ctx(m.group(3), en))
+    return t

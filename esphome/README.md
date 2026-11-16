@@ -1,44 +1,47 @@
-# ESPHome most pre Samsung EHS (NASA zbernica)
+# ESPHome bridge for Samsung EHS (NASA bus)
 
-Aplikácia Kúrenie AI nekomunikuje s tepelným čerpadlom priamo. Číta ho cez malý ESP32 modul s ESPHome
-([`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa)), ktorý je pripojený na
-dátovú zbernicu **NASA** (svorky **F1/F2**) a cez `web_server` (REST + SSE) sprístupňuje entity po sieti.
+[![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
 
-**Odporúčaný začiatok:** [`m5stack-tc.yaml`](m5stack-tc.yaml) je **overená, reálne bežiaca konfigurácia** referenčnej inštalácie
-(Split AE120JXEDGH, gen. J) – vrátane regulácie posunu krivky podľa izbovej teploty, časového plánu a hybridného režimu.
-Prepíš v nej entity Home Assistant (izbové senzory) a IP adresu; heslá sú v `secrets.yaml`.
+The Kúrenie AI app does not talk to the heat pump directly. It reads it through a small ESP32 module running ESPHome
+([`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa)), which is connected to the
+**NASA** data bus (terminals **F1/F2**) and exposes the entities over the network through `web_server` (REST + SSE).
 
-Súbor [`samsung-ehs.yaml`](samsung-ehs.yaml) je zjednodušený **návrh** (neoverený) – vzorová konfigurácia, ktorej **názvy entít sú rovnaké ako v predvolenom profile
-aplikácie** (`profil.default()["esp"]`). Ak ju použiješ bez zmeny názvov, v sprievodcovi „Zariadenie a dom“ stačí potvrdiť návrh.
+**Recommended starting point:** [`m5stack-tc.yaml`](m5stack-tc.yaml) is the **verified, actually running configuration** of the
+reference installation (Split AE120JXEDGH, gen. J) – including curve offset control based on room temperature, a time schedule
+and hybrid mode. Replace the Home Assistant entities (room sensors) and the IP address in it; passwords are in `secrets.yaml`.
 
-> Súbor nebol skompilovaný pre tvoj model. Čísla NASA správ označené „overené“ pochádzajú z príkladu komponentu,
-> riadky `TODO` je treba doplniť podľa tvojho modelu (viď nižšie). Chýbajúca entita nevadí – funkcia, ktorá ju potrebuje, sa vypne.
+The file [`samsung-ehs.yaml`](samsung-ehs.yaml) is a simplified **draft** (unverified) – a sample configuration whose **entity names match
+the app's default profile** (`profil.default()["esp"]`). If you use it without renaming the entities, you only need to confirm the
+suggestion in the "Device and home" wizard.
 
-## Čo budeš potrebovať
+> The file has not been compiled for your model. The NASA message numbers marked "verified" come from the component's example;
+> the `TODO` lines have to be filled in for your model (see below). A missing entity is not a problem – a feature that needs it is disabled.
 
-- M5Stack Atom (Lite/Matrix) a **Atomic RS485 Base** (alebo iná doska ESP32 + prevodník TTL–RS485).
-- Napájanie 5 V (z `V1`/`V2` na riadiacej doske jednotky cez menič, alebo samostatný USB adaptér).
-- Počítač s ESPHome (`pip install esphome` alebo doplnok ESPHome v Home Assistant) a USB kábel na prvé nahratie.
+## What you will need
 
-## Zapojenie
+- An M5Stack Atom (Lite/Matrix) and an **Atomic RS485 Base** (or another ESP32 board + a TTL–RS485 converter).
+- 5 V power (from `V1`/`V2` on the unit's control board through a converter, or a separate USB adapter).
+- A computer with ESPHome (`pip install esphome` or the ESPHome add-on in Home Assistant) and a USB cable for the first flash.
 
-Zbernica NASA je RS485 (9600 baud, parita even). Na riadiacej doske (MIM) vnútornej jednotky:
+## Wiring
 
-| RS485 základňa | svorka na doske |
+The NASA bus is RS485 (9600 baud, even parity). On the indoor unit's control board (MIM):
+
+| RS485 base | terminal on the board |
 |---|---|
-| A (žltá) | F1 |
-| B (zelená) | F2 |
-| V+ (červená) | V1 |
-| G (čierna) | V2 |
+| A (yellow) | F1 |
+| B (green) | F2 |
+| V+ (red) | V1 |
+| G (black) | V2 |
 
-- F3/F4 sú určené pre drôtové ovládače – nepripájaj tam nič.
-- V pôvodnej doske sú `V1`/`V2` zvyčajne zoskupené vpravo hore. Over napätie meraním, než pripojíš modul.
-- Pri zapojení vypni istič jednotky. Zásahy do riadiacej dosky robíš na vlastnú zodpovednosť.
-- UART piny sú v YAML ako premenné: `uart_tx: GPIO19`, `uart_rx: GPIO22` (platí pre Atomic RS485 Base). Pri inej doske ich zmeň.
+- F3/F4 are intended for wired controllers – do not connect anything there.
+- On the original board, `V1`/`V2` are usually grouped at the top right. Measure the voltage before connecting the module.
+- Switch off the unit's circuit breaker while wiring. Any work on the control board is at your own risk.
+- The UART pins are variables in the YAML: `uart_tx: GPIO19`, `uart_rx: GPIO22` (valid for the Atomic RS485 Base). Change them for a different board.
 
-## Nahratie
+## Flashing
 
-1. Skopíruj `samsung-ehs.yaml` do priečinka ESPHome a vedľa vytvor `secrets.yaml`:
+1. Copy `samsung-ehs.yaml` to your ESPHome folder and create `secrets.yaml` next to it:
 
    ```yaml
    wifi_ssid: "moja-wifi"
@@ -50,30 +53,31 @@ Zbernica NASA je RS485 (9600 baud, parita even). Na riadiacej doske (MIM) vnúto
    web_password: "..."
    ```
 
-2. Prvé nahratie cez USB: `esphome run samsung-ehs.yaml`. Ďalšie aktualizácie idú cez Wi‑Fi (OTA).
-3. Zisti IP adresu modulu (rezervuj ju v routeri) a v `config.env` aplikácie nastav `ESP_URL=http://<ip>`.
-   Ak zapneš `web_server.auth`, treba, aby aplikácia vedela prihlasovacie údaje – alebo `auth` v YAML vynechaj a modul
-   nechaj len v domácej sieti.
-4. Otvor `http://<ip>/` – v tabuľke by si mal vidieť entity so slovenskými názvami.
+2. First flash over USB: `esphome run samsung-ehs.yaml`. Later updates go over Wi‑Fi (OTA).
+3. Find the module's IP address (reserve it in your router) and set `ESP_URL=http://<ip>` in the app's `config.env`.
+   If you enable `web_server.auth`, the app needs to know the credentials – or leave `auth` out of the YAML and keep the module
+   in the home network only.
+4. Open `http://<ip>/` – the table should show the entities with Slovak names.
 
-## Dopĺňanie čísel správ (TODO riadky)
+## Filling in the message numbers (TODO lines)
 
-Číslo NASA správy závisí od modelu a firmvéru. Postup:
+The NASA message number depends on the model and firmware. Procedure:
 
-1. V `samsung_nasa:` nastav `debug_log_undefined_messages: true`, v `logger.logs` daj `samsung_nasa: DEBUG`.
-2. Sleduj log (`esphome logs samsung-ehs.yaml`) a zmeň na jednotke hodnotu (napr. spusti odmrazovanie, zmeň cieľ), aby si videl,
-   ktorá správa sa mení.
-3. Priraď číslo ku zakomentovanej entite (názov nemeň) a odkomentuj ju. Po overení vráť logovanie na `ERROR`.
+1. In `samsung_nasa:` set `debug_log_undefined_messages: true` and in `logger.logs` set `samsung_nasa: DEBUG`.
+2. Watch the log (`esphome logs samsung-ehs.yaml`) and change a value on the unit (e.g. start a defrost, change the target) to see
+   which message changes.
+3. Assign the number to the commented-out entity (do not change its name) and uncomment it. After verification, set logging back to `ERROR`.
 
-Nepovinné entity, ktoré v YAML zostanú zakomentované, v profile nechaj prázdne (sprievodca to urobí sám, ak ich v zozname ESP nenájde).
+Optional entities that stay commented out in the YAML should be left empty in the profile (the wizard does this itself if it
+does not find them in the ESP list).
 
-## Povinné entity pre aplikáciu
+## Required entities for the app
 
-`vonku`, `tw2` (výstup), `tw1` (spiatočka), `freq` (frekvencia kompresora), `wl` (cieľová voda), `posun` (posun krivky),
-`fsv2031`, `fsv2032`. Bez `freq`/`wl`/`posun` sa nezobrazia niektoré grafy a agent nemá z čoho posudzovať krivku – doplň ich.
+`vonku` (outdoor), `tw2` (flow), `tw1` (return), `freq` (compressor frequency), `wl` (target water temperature), `posun` (curve offset),
+`fsv2031`, `fsv2032`. Without `freq`/`wl`/`posun` some charts are not shown and the agent has nothing to judge the curve by – add them.
 
-## Izby
+## Rooms
 
-Izbové teploty (pole `esp` v izbách profilu) môžu pochádzať z ľubovoľného zdroja, ktorý ESP vystaví (Zigbee, BLE, entity
-z Home Assistantu cez `platform: homeassistant`). Alternatíva: v profile nechaj `esp` prázdne a použi len HA senzory
-(pole `ha`) – izba potom nemá živú hodnotu z ESP, ale história a štatistiky z HA fungujú.
+Room temperatures (the `esp` field of the rooms in the profile) can come from any source the ESP exposes (Zigbee, BLE, entities
+from Home Assistant via `platform: homeassistant`). Alternative: leave `esp` empty in the profile and use only HA sensors
+(the `ha` field) – the room then has no live value from the ESP, but the history and statistics from HA work.

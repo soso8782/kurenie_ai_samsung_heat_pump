@@ -9,6 +9,8 @@ Elektromer po hodinách nerozlišuje VT/NT, preto sa používa vážená cena po
 z mesačných odpočtov registrov 1.8.1/1.8.2, sep–nov 2026). Fixná mesačná platba sa rozpočíta na hodiny (12 platieb / 365 dní).
 Štatistiky sa vždy prepočítajú celé od prvej hodiny (import je idempotentný). V HA sa zapisujú len tieto dve vlastné štatistiky."""
 import calendar, datetime as _dt, json, os, time
+import i18n
+from i18n import tr
 
 STAT_ID = "kurenie:naklady_elektrina"
 STAT_NAME = "Náklady na elektrinu (SSE DD5)"
@@ -97,6 +99,8 @@ def sync(cfg):
     if not url or not token or not ha_ws.ENERGY_EXT_ID:   # bez nastaveného elektromera sa náklady nepočítajú
         return None
     cli = ha_ws.HAClient()
+    hl = i18n.home_lang(cfg)
+    names = {"E": tr("srv.ha_cost.name_house", hl), "C": tr("srv.ha_cost.name_cost", hl), "P": tr("srv.ha_cost.name_pump", hl)}   # názvy štatistík v HA podľa jazyka domácnosti
     try:
         cli.connect(url, token, timeout=30)
         res = cli.call({"type": "recorder/statistics_during_period", "start_time": START,
@@ -108,14 +112,14 @@ def sync(cfg):
         er, cr = build_rows(cfg, hourly)
         if not er:
             return {"hodin": 0, "kwh": 0.0, "spolu_eur": 0.0, "do": None}
-        _import(cli, {"statistic_id": STAT_E_ID, "source": "kurenie", "name": STAT_E_NAME, "unit_of_measurement": "kWh",
+        _import(cli, {"statistic_id": STAT_E_ID, "source": "kurenie", "name": names["E"], "unit_of_measurement": "kWh",
                       "has_mean": False, "has_sum": True}, er)
-        _import(cli, {"statistic_id": STAT_ID, "source": "kurenie", "name": STAT_NAME, "unit_of_measurement": "EUR",
+        _import(cli, {"statistic_id": STAT_ID, "source": "kurenie", "name": names["C"], "unit_of_measurement": "EUR",
                       "has_mean": False, "has_sum": True}, cr)
         out = {"hodin": len(er), "kwh": er[-1]["sum"], "spolu_eur": cr[-1]["sum"], "do": er[-1]["start"]}
         pr = pump_rows(cfg)
         if pr:
-            _import(cli, {"statistic_id": STAT_P_ID, "source": "kurenie", "name": STAT_P_NAME, "unit_of_measurement": "kWh",
+            _import(cli, {"statistic_id": STAT_P_ID, "source": "kurenie", "name": names["P"], "unit_of_measurement": "kWh",
                           "has_mean": False, "has_sum": True}, pr)
             out["cerpadlo_kwh"] = pr[-1]["sum"]
         return out

@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 import profil
 from common import ROOT, cfg_int, load_cfg
+import i18n
 from i18n import tr
 
 SCHEMA_VERSION = "1"
@@ -1220,8 +1221,16 @@ def refresh_kwh_dom(cfg, hours=48, now=None):
             con.close()
     except Exception as e:
         res["ok"] = False
-        res["error"] = "%s: %s" % (type(e).__name__, e)
+        res["error"] = "%s: %s" % (type(e).__name__, _ha_err_text(e, i18n.home_lang(cfg)))
     return res
+
+
+def _ha_err_text(e, lang):
+    try:
+        import ha_ws
+        return ha_ws.err_text(e, lang)
+    except Exception:
+        return e
 
 
 # ---------------------------------------------------------------- kalibrácia odhadu spotreby čerpadla
@@ -1823,6 +1832,27 @@ def _tl_add(out, s, e, st):
 
 
 # ---------------------------------------------------------------- dotazové funkcie
+_CAL_RANGE_RE = re.compile(r"^Vypočítaný podiel (\S+) je mimo rozsahu (\S+)–(\S+), použitá hranica\.$")
+_CAL_FEW_RE = re.compile(r"^Zatiaľ málo údajov: potrebné sú aspoň (\d+) dni s min\. (\d+) hodinami chodu kompresora \(>= (\d+) min\) "
+                         r"a údajom z elektromera, k dispozícii (\d+)\.$")
+_CAL_NOBASE = "Chýbajú hodiny bez chodu čerpadla aj dosť údajov na odhad základnej spotreby domu."
+
+
+def _cal_text(text, lang):
+    """Dôvod z kalibrácie (ukladá sa po slovensky do meta.kalibracia); na výstupe sa pre iný jazyk ako sk preloží."""
+    if lang == "sk" or not text:
+        return text
+    m = _CAL_RANGE_RE.match(text)
+    if m:
+        return tr("srv.stats.cal_range", lang, raw=m.group(1), lo=m.group(2), hi=m.group(3))
+    m = _CAL_FEW_RE.match(text)
+    if m:
+        return tr("srv.stats.cal_few", lang, days=m.group(1), hours=m.group(2), mins=m.group(3), have=m.group(4))
+    if text == _CAL_NOBASE:
+        return tr("srv.stats.cal_nobase", lang)
+    return text
+
+
 def coverage(cfg, lang="sk"):
     con = connect(cfg)
     try:
@@ -1839,7 +1869,7 @@ def coverage(cfg, lang="sk"):
         last_dom = con.execute("SELECT max(ts) FROM hourly WHERE kwh_dom IS NOT NULL").fetchone()[0]
         kal = {"k": cal.get("k"), "n_dni": cal.get("n_dni", 0), "n_hodin": cal.get("n_hodin", 0), "mape": cal.get("mape"),
                "ts": cal.get("ts"), "datum": cal.get("datum"), "zdroj": cal.get("zdroj") if cal.get("k") else None,
-               "dovod": cal.get("dovod"), "base_kwh": cal.get("base_kwh"), "base_zdroj": cal.get("base_zdroj"),
+               "dovod": _cal_text(cal.get("dovod"), lang), "base_kwh": cal.get("base_kwh"), "base_zdroj": cal.get("base_zdroj"),
                "metoda": cal.get("metoda"), "noc_zaklad_kwh": cal.get("noc_zaklad_kwh"), "prietok": get_prietok(con),
                "vypocitane": bool(cal)}
         return {"first_day": fd, "prietok": kal["prietok"],
