@@ -265,6 +265,8 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--panel);border:1p
 .note{border-top:1px solid var(--line);padding:12px 0}.note:first-child{border-top:0}
 .empty{color:var(--mut);font-size:14.5px}
 footer{color:var(--mut);font-size:12.5px;padding-bottom:36px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+footer.adm+footer.podpora{margin-top:-28px}
+footer.podpora a{color:var(--copper-ink)}
 /* v2: prihlásenie, poplachy, zásahy, nastavenia, súhrn */
 [hidden]{display:none!important}
 .p-rutina{background:var(--line);color:var(--ink-2)}
@@ -1195,6 +1197,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
   </div>
 
   <footer class="adm"><span data-i18n="spolocne.pata1">Tepelné čerpadlo Samsung EHS 12 kW · dáta zo zberača m5stack-tc</span><span data-i18n="spolocne.pata2">Dostupné len v domácej sieti</span></footer>
+  <footer class="podpora"><span><span data-i18n="spolocne.podpora">Páči sa ti aplikácia? Podpor projekt:</span> <a href="https://www.paypal.com/paypalme/sonics007" target="_blank" rel="noopener">PayPal</a> · <a href="https://ko-fi.com/soso8782" target="_blank" rel="noopener">Ko-fi</a></span><a href="https://github.com/soso8782/samsung_heat_pump-ai-control" target="_blank" rel="noopener">GitHub</a></footer>
 </main>
 <div id="tip"></div>
 <div class="gate" id="gate" hidden>
