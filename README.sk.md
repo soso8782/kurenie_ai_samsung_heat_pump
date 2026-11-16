@@ -159,7 +159,7 @@ Aplikáciu možno nasadiť aj na iné Samsung EHS (Mono/Split, iný výkon, iné
    | Mono R290 so zabudovaným čerpadlom | `AE050CXYBEK`, `AE080/120/160CXYBEK/GK` |
 
    Overený na reálnom zariadení je len `AE120JXEDGH`, ostatné majú `"overene": false` a presný zdroj (dokument a URL)
-   v poli `zdroj`. Mono HT Quiet 16 kW (`AE160BXYDGG`) zatiaľ chýba. Ako pridať ďalší model: [docs/MODELY.sk.md](docs/MODELY.sk.md).
+   v poli `zdroj`. Ako pridať ďalší model: [docs/MODELY.sk.md](docs/MODELY.sk.md).
    Pre model bez tabuľky COP funguje, ak je k dispozícii
    prietok zo senzora alebo z konfigurácie (`STATS_FLOW_LPM`); inak sa tepelný výkon a COP nezobrazia.
 4. **Mantinely** – predvolené hranice agenta sa prispôsobia typu kúrenia (radiátory / podlahové / kombinované) a profil ich

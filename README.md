@@ -170,7 +170,7 @@ without changing the code:
    | Mono R290 with integrated pump | `AE050CXYBEK`, `AE080/120/160CXYBEK/GK` |
 
    Only `AE120JXEDGH` has been verified on a real unit; the others have `"overene": false` and the exact source (document and
-   URL) in the `zdroj` field. Mono HT Quiet 16 kW (`AE160BXYDGG`) is still missing. How to add another model: [docs/MODELY.md](docs/MODELY.md).
+   URL) in the `zdroj` field. How to add another model: [docs/MODELY.md](docs/MODELY.md).
    For a model without a table, COP works if a flow rate is available from a sensor or from the configuration
    (`STATS_FLOW_LPM`); otherwise heat output and COP are not shown.
 4. **Limits** – the agent's default limits adapt to the heating type (radiators / underfloor / combined), and the profile can

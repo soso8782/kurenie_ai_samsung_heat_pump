@@ -28,7 +28,8 @@ others have `"overene": false`. Where the manufacturer gives one table for both 
 Series A (`AE…AXED…H`): in the PDF the cell 23.09/5.07 is copied into the LWT 40 °C column at 30 and 35 °C outdoor; those
 cells are `null`. Tables with a water-flow column (HC, PI, WF) were read in triples.
 
-Missing: Mono HT Quiet 16 kW (`AE160BXYDGG`) – not in the HT Quiet data book Ver. 2.1.
+Mono HT Quiet R32 exists only as 8, 12 and 14 kW (both data books list no 16 kW unit); for 16 kW use the Mono R290
+(`AE160CXY*K`) or the standard Mono R32 (`AE160RXYD*G`).
 
 ## How to add a model
 

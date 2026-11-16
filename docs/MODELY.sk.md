@@ -28,7 +28,8 @@ súbory s rovnakými hodnotami (`…EG` a `…GG`).
 Rad A (`AE…AXED…H`): v PDF je bunka 23.09/5.07 skopírovaná do stĺpca LWT 40 °C pri 30 a 35 °C vonku; tieto bunky sú
 `null`. Tabuľky so stĺpcom prietoku (HC, PI, WF) sa čítali po trojiciach.
 
-Chýba: Mono HT Quiet 16 kW (`AE160BXYDGG`) – v dátovej knihe HT Quiet Ver. 2.1 nie je.
+Mono HT Quiet R32 existuje len vo výkonoch 8, 12 a 14 kW (16 kW neuvádza ani jedna dátová kniha); pre 16 kW slúži
+Mono R290 (`AE160CXY*K`) alebo štandardné Mono R32 (`AE160RXYD*G`).
 
 ## Ako pridať model
 
