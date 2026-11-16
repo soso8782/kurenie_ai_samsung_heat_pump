@@ -950,7 +950,7 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
     <section class="panel pad sgroup" id="haintsettings">
       <h3 data-i18n="nastavenia.haint_titul">Integrácia do Home Assistanta</h3>
       <div class="hastat"><span class="dot" id="haintdot"></span><span id="haintstat"></span></div>
-      <p class="sub" data-i18n="nastavenia.haint_popis">Integrácia „Kúrenie AI“ (custom_components/kurenie_ai, inštalácia cez HACS) zobrazí v Home Assistante izby, vodu, kompresor, TÚV a agenta a umožní meniť režim agenta a cieľovú teplotu. Pri pridaní integrácie zadaj adresu tejto aplikácie a kľúč.</p>
+      <p class="sub" data-i18n="nastavenia.haint_popis">Integrácia „Samsung Heat Pump AI Control“ (custom_components/samsung_heat_pump_ai_control, inštalácia cez HACS) zobrazí v Home Assistante izby, vodu, kompresor, TÚV a agenta a umožní meniť režim agenta a cieľovú teplotu. Pri pridaní integrácie zadaj adresu tejto aplikácie a kľúč.</p>
       <div class="sub"><span data-i18n="nastavenia.haint_adresa">Adresa aplikácie pre integráciu:</span> <code id="haintaddr"></code></div>
       <div id="haintkeybox" hidden style="margin-top:10px">
         <label for="haintkey" data-i18n="nastavenia.haint_novy">Nový kľúč (zobrazí sa len teraz – skopíruj ho):</label>
@@ -3172,7 +3172,7 @@ function haView(h) {
   if (h.ok) return {cls: "ok", text: t("spolocne.pripojene") + (h.count != null ? " · " + h.count + " " + tn("cidla.senzor_pl", h.count) : "") + (h.last_ok ? t("nastavenia.ha_posledne_citanie", {v: hhmm(h.last_ok)}) : ""), short: t("spolocne.pripojene") + (h.last_ok ? " · " + hhmm(h.last_ok) : ""), tip: t("nastavenia.ha_tip_ok")};
   return {cls: "bad", text: t("nastavenia.ha_chyba", {v: h.error || t("spolocne.ha_neodpoveda")}), short: t("nastavenia.ha_chyba_spojenia"), tip: h.error || t("spolocne.ha_neodpoveda")};
 }
-/* integrácia Home Assistant: kľúč pre custom component kurenie_ai (v DB len odtlačok; nový kľúč sa ukáže raz) */
+/* integrácia Home Assistant: kľúč pre custom component samsung_heat_pump_ai_control (v DB len odtlačok; nový kľúč sa ukáže raz) */
 function renderHaInt(info) {
   const st = $("#haintstat"); if (!st) return;
   const set = !!(info && info.set);

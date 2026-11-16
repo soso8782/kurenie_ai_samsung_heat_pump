@@ -532,7 +532,7 @@
  "nastavenia.haint_nastaveny": "Kľúč je nastavený (vytvorený {d}).",
  "nastavenia.haint_nenastaveny": "Kľúč nie je nastavený – integrácia sa nepripojí.",
  "nastavenia.haint_novy": "Nový kľúč (zobrazí sa len teraz – skopíruj ho):",
- "nastavenia.haint_popis": "Integrácia „Kúrenie AI“ (custom_components/kurenie_ai, inštalácia cez HACS) zobrazí v Home Assistante izby, vodu, kompresor, TÚV a agenta a umožní meniť režim agenta a cieľovú teplotu. Pri pridaní integrácie zadaj adresu tejto aplikácie a kľúč.",
+ "nastavenia.haint_popis": "Integrácia „Samsung Heat Pump AI Control“ (custom_components/samsung_heat_pump_ai_control, inštalácia cez HACS) zobrazí v Home Assistante izby, vodu, kompresor, TÚV a agenta a umožní meniť režim agenta a cieľovú teplotu. Pri pridaní integrácie zadaj adresu tejto aplikácie a kľúč.",
  "nastavenia.haint_potvrd_novy": "Vytvoriť nový kľúč? Doterajší prestane platiť a integráciu v Home Assistante bude treba znova prihlásiť.",
  "nastavenia.haint_potvrd_zrusit": "Zrušiť kľúč? Integrácia v Home Assistante prestane fungovať.",
  "nastavenia.haint_skopirovany": "Skopírované do schránky.",

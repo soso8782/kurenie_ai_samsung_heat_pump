@@ -532,7 +532,7 @@
  "nastavenia.haint_nastaveny": "Key is set (created {d}).",
  "nastavenia.haint_nenastaveny": "No key set – the integration cannot connect.",
  "nastavenia.haint_novy": "New key (shown only now – copy it):",
- "nastavenia.haint_popis": "The “Kúrenie AI” integration (custom_components/kurenie_ai, install via HACS) shows rooms, water, compressor, hot water and the agent in Home Assistant and lets you change the agent mode and target temperature. When adding the integration, enter this app's address and the key.",
+ "nastavenia.haint_popis": "The “Samsung Heat Pump AI Control” integration (custom_components/samsung_heat_pump_ai_control, install via HACS) shows rooms, water, compressor, hot water and the agent in Home Assistant and lets you change the agent mode and target temperature. When adding the integration, enter this app's address and the key.",
  "nastavenia.haint_potvrd_novy": "Create a new key? The current one will stop working and the Home Assistant integration will need to re-authenticate.",
  "nastavenia.haint_potvrd_zrusit": "Revoke the key? The Home Assistant integration will stop working.",
  "nastavenia.haint_skopirovany": "Copied to clipboard.",

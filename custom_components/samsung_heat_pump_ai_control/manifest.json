@@ -1,6 +1,6 @@
 {
-  "domain": "kurenie_ai",
-  "name": "Kúrenie AI",
+  "domain": "samsung_heat_pump_ai_control",
+  "name": "Samsung Heat Pump AI Control",
   "codeowners": ["@soso8782"],
   "config_flow": true,
   "documentation": "https://github.com/soso8782/samsung_heat_pump-ai-control",

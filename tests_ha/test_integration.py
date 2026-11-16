@@ -6,7 +6,7 @@ Spustenie z priečinka gh_kurenie:  python -X utf8 -m unittest discover -s tests
 import importlib.util, json, os, py_compile, re, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-COMP = os.path.join(ROOT, "custom_components", "kurenie_ai")
+COMP = os.path.join(ROOT, "custom_components", "samsung_heat_pump_ai_control")
 
 spec = importlib.util.spec_from_file_location("kurenie_model", os.path.join(COMP, "model.py"))
 model = importlib.util.module_from_spec(spec)
@@ -104,8 +104,10 @@ class Hodnoty(unittest.TestCase):
         s = state()
         self.assertEqual(model.room_target_range(s), (19.0, 24.0))
         self.assertEqual(model.room_target(s), 23.5)
-        self.assertEqual(model.device_info(s), {"name": "Kúrenie AI – Samsung EHS Mono", "model": "AE080", "sw_version": "2.3.0"})
-        self.assertEqual(model.device_info({})["name"], "Kúrenie AI")
+        self.assertEqual(model.device_info(s), {"name": "Samsung Heat Pump AI Control", "model": "AE080", "sw_version": "2.3.0"})
+        self.assertEqual(model.device_info({})["name"], "Samsung Heat Pump AI Control")
+        self.assertEqual(model.entry_title(s), "Samsung Heat Pump AI Control – Samsung EHS Mono")
+        self.assertEqual(model.entry_title({}), "Samsung Heat Pump AI Control")
         self.assertTrue(model.validate_state(s))
         self.assertFalse(model.validate_state({"api": 2}))
         self.assertFalse(model.validate_state([]))
@@ -161,12 +163,12 @@ class Subory(unittest.TestCase):
         for rel in ("manifest.json", "strings.json", "translations/sk.json", "translations/en.json", "../../hacs.json"):
             load(rel)
         m = load("manifest.json")
-        self.assertEqual(m["domain"], "kurenie_ai")
+        self.assertEqual(m["domain"], "samsung_heat_pump_ai_control")
         self.assertTrue(m["config_flow"])
         self.assertEqual(m["iot_class"], "local_polling")
         self.assertEqual(m["version"], "2.3.0")
         self.assertEqual(m["codeowners"], ["@soso8782"])
-        self.assertEqual(load("../../hacs.json"), {"name": "Kúrenie AI", "render_readme": True})
+        self.assertEqual(load("../../hacs.json"), {"name": "Samsung Heat Pump AI Control", "render_readme": True})
 
     def test_preklady(self):
         def keys(d, p=""):
