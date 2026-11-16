@@ -10,7 +10,7 @@ Ak ti projekt šetrí peniaze alebo čas, môžeš ma podporiť kávou cez PayPa
 [![Verzia](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=verzia&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Aktuálna verzia: 2.5.0** (16. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
+**Aktuálna verzia: 2.6.0** (16. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
 
 Domáci systém, ktorý zbiera dáta z tepelného čerpadla **Samsung EHS** (cez NASA zbernicu a ESPHome), počíta skutočnú spotrebu
 a COP, sleduje teploty v izbách a pomocou jazykového modelu (cez [OpenRouter](https://openrouter.ai)) **radí alebo priamo
@@ -144,18 +144,22 @@ Aplikáciu možno nasadiť aj na iné Samsung EHS (Mono/Split, iný výkon, iné
    Súbor `profil.json` môžeš upraviť aj ručne – vzor je [`profil.example.json`](profil.example.json), popis položiek
    v [docs/PROFIL.sk.md](docs/PROFIL.sk.md). Bez `profil.json` platí pôvodná inštalácia (Samsung AE120JXEDGH, radiátory, 7 izieb).
 3. **Model zariadenia** – v `modely/` sú tabuľky výkonu a príkonu (Maximum Heating Capacity, Peak) z dokumentácie výrobcu
-   pre 31 modelov Samsung EHS:
+   pre 54 modelov Samsung EHS:
 
    | Rad | Modely (vonkajšia jednotka) |
    |---|---|
    | Split R410A (gen. J) | `AE040/060JXEDEH`, `AE090/120/140/160JXEDGH` |
+   | Split R410A (rad A) | `AE120/160AXEDEH/GH` |
    | Split R32 | `AE040/060RXEDEG`, `AE090RXEDEG/GG` |
+   | Split R32 (DXED) | `AE125/160DXEDEG/GG` |
+   | Mono R410A (gen. J) | `AE050JXYDEH`, `AE090/120/140/160JXYDEH/GH` |
    | Mono R32 | `AE050RXYDEG`, `AE080/120/160RXYDEG/GG` |
+   | Mono HT Quiet R32 | `AE080/120/140BXYDEG/GG` |
    | Mono R290 | `AE050CXYDEK`, `AE080/120/160CXYDEK/GK` |
    | Mono R290 so zabudovaným čerpadlom | `AE050CXYBEK`, `AE080/120/160CXYBEK/GK` |
 
    Overený na reálnom zariadení je len `AE120JXEDGH`, ostatné majú `"overene": false` a presný zdroj (dokument a URL)
-   v poli `zdroj`. Mono HT Quiet (`AE…BXYD…`) zatiaľ chýba. Ako pridať ďalší model: [docs/MODELY.sk.md](docs/MODELY.sk.md).
+   v poli `zdroj`. Mono HT Quiet 16 kW (`AE160BXYDGG`) zatiaľ chýba. Ako pridať ďalší model: [docs/MODELY.sk.md](docs/MODELY.sk.md).
    Pre model bez tabuľky COP funguje, ak je k dispozícii
    prietok zo senzora alebo z konfigurácie (`STATS_FLOW_LPM`); inak sa tepelný výkon a COP nezobrazia.
 4. **Mantinely** – predvolené hranice agenta sa prispôsobia typu kúrenia (radiátory / podlahové / kombinované) a profil ich

@@ -11,8 +11,12 @@ the table-based COP and to calibrate the circuit flow rate.
 | Series | Models | Table range | Source |
 |---|---|---|---|
 | Split R410A (gen. J) | AE040JXEDEH, AE060JXEDEH, AE090JXEDGH, **AE120JXEDGH** (verified), AE140JXEDGH, AE160JXEDGH | −20…20 °C outdoor, water 25–55 °C | EHS Split Technical Data Book (Europe) |
+| Split R410A (series A) | AE120AXEDEH/GH, AE160AXEDEH/GH | −25…35 °C, water 25–55 °C | EHS Split for Europe (R410A) TDB Ver. 1.1 |
 | Split R32 | AE040RXEDEG, AE060RXEDEG, AE090RXEDEG/GG | −20…20 °C, water 25–55 °C | EHS Split Technical Data Book (Europe) |
+| Split R32 (DXED, 12.5–16 kW) | AE125DXEDEG/GG, AE160DXEDEG/GG | −25…35 °C, water 25–65 °C | TDB 2024 EHS Split for Europe Ver. 1.1 |
+| Mono R410A (gen. J) | AE050JXYDEH, AE090JXYDEH/GH, AE120JXYDEH/GH, AE140JXYDEH/GH, AE160JXYDEH/GH | −20…20 °C, water 30–55 °C | EHS Mono 50Hz TDB Ver. 1.5 |
 | Mono R32 | AE050RXYDEG, AE080RXYDEG/GG, AE120RXYDEG/GG, AE160RXYDEG/GG | −20…20 °C, water 30–65 °C | EHS tank integrated Hydro Unit TDB (Mono, R32) |
+| Mono HT Quiet R32 | AE080BXYDEG/GG, AE120BXYDEG/GG, AE140BXYDEG/GG | −30…43 °C, water 25–70 °C | EHS Mono HT Quiet TDB Ver. 2.1 |
 | Mono R290 | AE050CXYDEK, AE080CXYDEK/GK, AE120CXYDEK/GK, AE160CXYDEK/GK | −25…35 °C, water 25–75 °C | EHS Mono R290 TDB |
 | Mono R290 with integrated pump | AE050CXYBEK, AE080CXYBEK/GK, AE120CXYBEK/GK, AE160CXYBEK/GK | −25…35 °C, water 25–75 °C | EHS Mono R290 Pump TDB |
 
@@ -21,7 +25,10 @@ The exact document title and URL are in the `zdroj` field of each file. The numb
 others have `"overene": false`. Where the manufacturer gives one table for both the 1-phase and the 3-phase version
 (`AE080RXYD*G`), the library has two files with identical values (`…EG` and `…GG`).
 
-Missing: Mono HT Quiet (`AE…BXYD…`) – no publicly available data book with a readable table was found.
+Series A (`AE…AXED…H`): in the PDF the cell 23.09/5.07 is copied into the LWT 40 °C column at 30 and 35 °C outdoor; those
+cells are `null`. Tables with a water-flow column (HC, PI, WF) were read in triples.
+
+Missing: Mono HT Quiet 16 kW (`AE160BXYDGG`) – not in the HT Quiet data book Ver. 2.1.
 
 ## How to add a model
 

@@ -10,7 +10,7 @@ If this project saves you money or time, you can buy me a coffee via PayPal or K
 [![Version](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=version&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Current version: 2.5.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
+**Current version: 2.6.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
 
 A home system that collects data from a **Samsung EHS** heat pump (via the NASA bus and ESPHome), calculates actual energy
 consumption and COP, monitors room temperatures and uses a language model (via [OpenRouter](https://openrouter.ai)) to
@@ -155,18 +155,22 @@ without changing the code:
    fields are described in [docs/PROFIL.md](docs/PROFIL.md). Without `profil.json` the original installation applies
    (Samsung AE120JXEDGH, radiators, 7 rooms).
 3. **Device model** – `modely/` contains the capacity and power input tables (Maximum Heating Capacity, Peak) from the
-   manufacturer's documentation for 31 Samsung EHS models:
+   manufacturer's documentation for 54 Samsung EHS models:
 
    | Series | Models (outdoor unit) |
    |---|---|
    | Split R410A (gen. J) | `AE040/060JXEDEH`, `AE090/120/140/160JXEDGH` |
+   | Split R410A (series A) | `AE120/160AXEDEH/GH` |
    | Split R32 | `AE040/060RXEDEG`, `AE090RXEDEG/GG` |
+   | Split R32 (DXED) | `AE125/160DXEDEG/GG` |
+   | Mono R410A (gen. J) | `AE050JXYDEH`, `AE090/120/140/160JXYDEH/GH` |
    | Mono R32 | `AE050RXYDEG`, `AE080/120/160RXYDEG/GG` |
+   | Mono HT Quiet R32 | `AE080/120/140BXYDEG/GG` |
    | Mono R290 | `AE050CXYDEK`, `AE080/120/160CXYDEK/GK` |
    | Mono R290 with integrated pump | `AE050CXYBEK`, `AE080/120/160CXYBEK/GK` |
 
    Only `AE120JXEDGH` has been verified on a real unit; the others have `"overene": false` and the exact source (document and
-   URL) in the `zdroj` field. Mono HT Quiet (`AE…BXYD…`) is still missing. How to add another model: [docs/MODELY.md](docs/MODELY.md).
+   URL) in the `zdroj` field. Mono HT Quiet 16 kW (`AE160BXYDGG`) is still missing. How to add another model: [docs/MODELY.md](docs/MODELY.md).
    For a model without a table, COP works if a flow rate is available from a sensor or from the configuration
    (`STATS_FLOW_LPM`); otherwise heat output and COP are not shown.
 4. **Limits** – the agent's default limits adapt to the heating type (radiators / underfloor / combined), and the profile can

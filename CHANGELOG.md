@@ -2,6 +2,14 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.6.0] – 2026-11-16
+
+### Pridané
+- **23 nových modelov** v `modely/` (spolu 54) z dátových kníh výrobcu, tabuľky Maximum Heating Capacity (Peak):
+  Mono HT Quiet R32 `AE080/120/140BXYDEG/GG` (voda 25–70 °C, vonku −30…43 °C), Mono R410A gen. J
+  `AE050JXYDEH`, `AE090/120/140/160JXYDEH/GH`, Split R32 DXED `AE125/160DXEDEG/GG`, Split R410A rad A `AE120/160AXEDEH/GH`.
+  Hodnoty vyčítané skriptom a namátkovo overené proti PDF; žiadny z nich nie je overený na reálnom zariadení.
+
 ## [2.5.0] – 2026-11-16
 
 ### Zmenené
@@ -124,6 +132,7 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.6.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.6.0
 [2.5.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.5.0
 [2.4.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.4.0
 [2.3.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.3.0
