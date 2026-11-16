@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icon-512.png" width="120" alt="Logo"></p>
+<p align="center"><img src="assets/logo-transparent.png" width="120" alt="Logo"></p>
 
 # Samsung Heat Pump AI Control – smart control for Samsung EHS heat pumps
 
