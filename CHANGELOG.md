@@ -2,6 +2,15 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] – 2026-11-16
+
+### Pridané
+- **Preklad textov zo servera:** chybové a informačné hlášky API, názvy metrík štatistík, upozornenia, výsledky agenta
+  bez modelu a názvy HA senzorov (MQTT discovery) sa prekladajú cez nový modul `i18n.py` (kľúče `srv.*` v tých istých
+  `locales/sk.json` a `locales/en.json`). Jazyk požiadavky z webu je v hlavičke `X-Lang`; texty bez požiadavky
+  (upozornenia, agent, týždenný súhrn, HA senzory) idú v jazyku domácnosti `UI_LANG` (`sk` / `en`, Nastavenia → Model).
+- Systémové prompty agenta ostávajú po slovensky, pridáva sa im pokyn „Odpovedaj v jazyku: …“.
+- `test_server_i18n.py`.
 ## [2.2.0] – 2026-11-15
 
 ### Pridané

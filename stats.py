@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 import profil
 from common import ROOT, cfg_int, load_cfg
+from i18n import tr
 
 SCHEMA_VERSION = "1"
 HOUR = 3600
@@ -83,19 +84,32 @@ _M_TAIL = [
 ]
 METRICS = []
 METRIC_KEYS = []
+_PROFILE = None
 _MDEC = {}
 
 
-def _metrics(p):
-    """Zoznam metrík pre UI štatistík: izby a ďalšie sledované teploty podľa profilu (referenčná izba je „riadiaca“)."""
+def _metrics(p, lang="sk"):
+    """Zoznam metrík pre UI štatistík: izby a ďalšie sledované teploty podľa profilu (referenčná izba je „riadiaca“).
+    Názvy v jazyku `lang` (sk = pôvodné texty); názvy izieb z profilu sa neprekladajú."""
     ref = profil.reference_room(p)
     names = profil.room_names(p)
-    out = [_m(*x) for x in _M_HEAD]
+
+    def lb(x):
+        return x[1] if lang == "sk" else tr("srv.stats.m_" + x[0], lang)
+    out = [_m(x[0], lb(x), *x[2:]) for x in _M_HEAD]
     for k in profil.room_keys(p):
-        out.append(_m(k, names[k] + (" (riadiaca)" if k == ref else ""), "°C", "izby", 1, "avg"))
+        out.append(_m(k, names[k] + ((" (riadiaca)" if lang == "sk" else " " + tr("srv.stats.riadiaca", lang)) if k == ref else ""), "°C", "izby", 1, "avg"))
     for k in profil.extra_temp_keys(p):
-        out.append(_m(k, _EXTRA_NAMES.get(k) or k.replace("_", " ").capitalize(), "°C", "izby", 1, "avg"))
-    return out + [_m(*x) for x in _M_TAIL]
+        nm = _EXTRA_NAMES.get(k)
+        if nm and lang != "sk":
+            nm = tr("srv.stats.x_" + k, lang)
+        out.append(_m(k, nm or k.replace("_", " ").capitalize(), "°C", "izby", 1, "avg"))
+    return out + [_m(x[0], lb(x), *x[2:]) for x in _M_TAIL]
+
+
+def metrics(lang="sk"):
+    """Metriky v jazyku požiadavky (sk = METRICS)."""
+    return METRICS if lang == "sk" or _PROFILE is None else _metrics(_PROFILE, lang)
 
 
 # poruchy: predvyplnené kódy (len INSERT OR IGNORE, úpravy používateľa sa nikdy neprepíšu)
@@ -116,6 +130,18 @@ SEED_CODES = [
     ("CHYBA_TC", "Chyba tepelného čerpadla (upozornenie)", "Agent poslal upozornenie na chybový kód tepelného čerpadla.",
      "Pozri presný kód v texte poruchy a doplň ho do zoznamu kódov."),
 ]
+
+_SEED_KEY = {c[0]: c[1].lower() for c in (("E911", "e911"), ("DATA", "data"), ("ESP", "esp"), ("ZBERAC", "zberac"), ("DOHREV", "dohrev"),
+                                           ("AGENT_CHYBA", "agent_chyba"), ("HA", "ha"), ("CHYBA_TC", "chyba_tc"))}
+_SEED_BY = {c[0]: c[1:] for c in SEED_CODES}
+
+
+def _seed_tr(code, idx, val, lang):
+    """Predvyplnený (neupravený) text kódu poruchy sa pre iný jazyk ako sk preloží; upravený používateľom ostáva."""
+    if lang == "sk" or code not in _SEED_BY or _SEED_BY[code][idx] != val:
+        return val
+    return tr("srv.stats.seed_%s_%s" % (_SEED_KEY[code], ("title", "desc", "fix")[idx]), lang)
+
 
 DDL = """
 CREATE TABLE IF NOT EXISTS cycles(id INTEGER PRIMARY KEY, ts_start INTEGER, ts_stop INTEGER, minutes REAL, f_max REAL, f_avg REAL,
@@ -226,12 +252,12 @@ def _meta_set(con, k, v):
 _DRE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def _pdate(s):
+def _pdate(s, lang="sk"):
     if isinstance(s, _dt.datetime):
         return s.date()
     if isinstance(s, _dt.date):
         return s
-    bad = ValueError("Neplatný dátum „%s“ (očakávaný tvar RRRR-MM-DD)." % (s,))
+    bad = ValueError(tr("srv.stats.datum_neplatny", lang, s=s))
     if not isinstance(s, str) or not _DRE.match(s.strip()):
         raise bad
     try:
@@ -239,7 +265,7 @@ def _pdate(s):
     except ValueError:
         raise bad
     if not 2000 <= d.year <= 2100:
-        raise ValueError("Dátum je mimo podporovaného rozsahu (roky 2000–2100).")
+        raise ValueError(tr("srv.stats.datum_rozsah", lang))
     return d
 
 
@@ -267,8 +293,8 @@ def _shift_years(d, n):
         return d.replace(year=d.year - n, day=28)
 
 
-def _slk(d):
-    return "%d. %d. %d" % (d.day, d.month, d.year)
+def _slk(d, lang="sk"):
+    return tr("srv.stats.datum", lang, d=d.day, m=d.month, y=d.year)
 
 
 def _hbase(cfg):
@@ -979,23 +1005,40 @@ def _fc_map(con):
     return {r[0]: r[1:] for r in con.execute("SELECT code, title, description, fix FROM fault_codes")}
 
 
-def _unknown_title(code):
+def _unknown_title(code, lang="sk"):
     c = str(code)
-    return "Neznáma chyba " + (c if re.match(r"^E\d+$", c) else ("E" + c if c.isdigit() else c))
+    return tr("srv.stats.neznama_chyba", lang, code=(c if re.match(r"^E\d+$", c) else ("E" + c if c.isdigit() else c)))
 
 
-def _fault_dict(r, fc, now):
+_GAP_RE = re.compile(r"^Výpadok dát (trvá už|trval) (\d+) min\.$")
+_TCERR_RE = re.compile(r"^Chybový kód tepelného čerpadla E(\d+)\.$")
+
+
+def _fault_text(text, src, lang):
+    """Texty automatických porúch sa ukladajú po slovensky; na výstupe sa preložia (pre sk bez zmeny)."""
+    if lang == "sk" or not text:
+        return text
+    m = _GAP_RE.match(text) if src == "gap" else _TCERR_RE.match(text) if src == "tc_error" else None
+    if not m:
+        return text
+    if src == "gap":
+        return tr("srv.stats.gap_trva" if m.group(1) == "trvá už" else "srv.stats.gap_trval", lang, n=m.group(2))
+    return tr("srv.stats.tc_chyba", lang, code=m.group(1))
+
+
+def _fault_dict(r, fc, now, lang="sk"):
     fid, s, e, code, src, title, text, akey, created = r
     known = fc.get(code)
     if known:
         t, desc, fix = known
+        t, desc, fix = _seed_tr(code, 0, t, lang), _seed_tr(code, 1, desc, lang), _seed_tr(code, 2, fix, lang)
         if src == "manual" and title:
             t = title
     else:
-        t, desc, fix = (title or _unknown_title(code)), "Doplň popis v zozname kódov.", ""
+        t, desc, fix = (title or _unknown_title(code, lang)), tr("srv.stats.doplnit_popis", lang), ""
     end = e if e is not None else None
     dur = ((e if e is not None else now) - s) / 60.0
-    return {"id": fid, "ts_start": s, "ts_end": e, "code": code, "source": src, "title": t, "text": text or "",
+    return {"id": fid, "ts_start": s, "ts_end": e, "code": code, "source": src, "title": t, "text": _fault_text(text, src, lang) or "",
             "description": desc or "", "fix": fix or "", "auto_key": akey, "created": created,
             "duration_min": round(max(0.0, dur), 1), "open": e is None,
             "from": time.strftime("%Y-%m-%d %H:%M", time.localtime(s)),
@@ -1005,10 +1048,10 @@ def _fault_dict(r, fc, now):
 _FSEL = "SELECT id, ts_start, ts_end, code, source, title, text, auto_key, created FROM faults"
 
 
-def faults_list(cfg, date_from=None, date_to=None, only_open=False):
+def faults_list(cfg, date_from=None, date_to=None, only_open=False, lang="sk"):
     """Poruchy zasahujúce do obdobia (dátumy RRRR-MM-DD, None = bez hranice); najnovšie prvé."""
-    a = _bounds(_pdate(date_from))[0] if date_from else None
-    b = _bounds(_pdate(date_to))[1] if date_to else None
+    a = _bounds(_pdate(date_from, lang))[0] if date_from else None
+    b = _bounds(_pdate(date_to, lang))[1] if date_to else None
     where, args = [], []
     if b is not None:
         where.append("ts_start<?")
@@ -1023,16 +1066,16 @@ def faults_list(cfg, date_from=None, date_to=None, only_open=False):
         fc = _fc_map(con)
         rows = con.execute(_FSEL + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY ts_start DESC, id DESC", args).fetchall()
         now = int(time.time())
-        return [_fault_dict(r, fc, now) for r in rows]
+        return [_fault_dict(r, fc, now, lang) for r in rows]
     finally:
         con.close()
 
 
-def _pts(v, what):
+def _pts(v, what, lang="sk"):
     if v is None or v == "":
         return None
     if isinstance(v, bool):
-        raise ValueError("Neplatný čas %s." % what)
+        raise ValueError(tr("srv.stats.cas_neplatny", lang, what=what))
     if isinstance(v, (int, float)):
         return int(v)
     s = str(v).strip()
@@ -1043,20 +1086,20 @@ def _pts(v, what):
             return int(time.mktime(time.strptime(s, fmt)))
         except ValueError:
             pass
-    raise ValueError("Neplatný čas %s „%s“ (tvar RRRR-MM-DD HH:MM)." % (what, s))
+    raise ValueError(tr("srv.stats.cas_format", lang, what=what, s=s))
 
 
-def fault_add(cfg, ts_start, ts_end, code, title="", text=""):
+def fault_add(cfg, ts_start, ts_end, code, title="", text="", lang="sk"):
     """Ručne pridaná porucha (source 'manual'). Vracia id."""
-    s = _pts(ts_start, "začiatku")
+    s = _pts(ts_start, tr("srv.stats.what_zaciatku", lang), lang)
     if s is None:
-        raise ValueError("Chýba čas začiatku poruchy.")
-    e = _pts(ts_end, "konca")
+        raise ValueError(tr("srv.stats.chyba_zaciatok", lang))
+    e = _pts(ts_end, tr("srv.stats.what_konca", lang), lang)
     if e is not None and e < s:
-        raise ValueError("Koniec poruchy je pred jej začiatkom.")
+        raise ValueError(tr("srv.stats.koniec_pred", lang))
     code = str(code or "").strip().upper()
     if not re.match(r"^[A-Z0-9_.\-]{1,32}$", code):
-        raise ValueError("Neplatný kód poruchy (písmená, číslice, max. 32 znakov).")
+        raise ValueError(tr("srv.stats.kod_neplatny", lang))
     title = str(title or "").strip()[:200]
     text = str(text or "").strip()[:2000]
     con = connect(cfg)
@@ -1069,19 +1112,19 @@ def fault_add(cfg, ts_start, ts_end, code, title="", text=""):
         con.close()
 
 
-def fault_delete(cfg, fid):
+def fault_delete(cfg, fid, lang="sk"):
     """Zmaže ručne pridanú poruchu; automatické poruchy sa mazať nedajú (ValueError)."""
     try:
         fid = int(fid)
     except (TypeError, ValueError):
-        raise ValueError("Neplatné id poruchy.")
+        raise ValueError(tr("srv.stats.id_neplatne", lang))
     con = connect(cfg)
     try:
         r = con.execute("SELECT source FROM faults WHERE id=?", (fid,)).fetchone()
         if not r:
-            raise ValueError("Porucha neexistuje.")
+            raise ValueError(tr("srv.stats.porucha_neexistuje", lang))
         if r[0] != "manual":
-            raise ValueError("Zmazať sa dajú iba ručne pridané poruchy.")
+            raise ValueError(tr("srv.stats.mazat_manual", lang))
         con.execute("DELETE FROM faults WHERE id=?", (fid,))
         con.commit()
         return True
@@ -1089,30 +1132,31 @@ def fault_delete(cfg, fid):
         con.close()
 
 
-def fault_codes_list(cfg):
+def fault_codes_list(cfg, lang="sk"):
     con = connect(cfg)
     try:
-        return [{"code": c, "title": t, "description": d or "", "fix": f or "", "editable": int(e if e is not None else 1)}
+        return [{"code": c, "title": _seed_tr(c, 0, t, lang), "description": _seed_tr(c, 1, d, lang) or "", "fix": _seed_tr(c, 2, f, lang) or "",
+                 "editable": int(e if e is not None else 1)}
                 for c, t, d, f, e in con.execute("SELECT code, title, description, fix, editable FROM fault_codes ORDER BY code")]
     finally:
         con.close()
 
 
-def fault_code_set(cfg, code, title, description="", fix=""):
+def fault_code_set(cfg, code, title, description="", fix="", lang="sk"):
     """Vytvorí alebo upraví kód poruchy v zozname kódov. Vracia uložený záznam."""
     code = str(code or "").strip().upper()
     if not re.match(r"^[A-Z0-9_.\-]{1,32}$", code):
-        raise ValueError("Neplatný kód poruchy (písmená, číslice, max. 32 znakov).")
+        raise ValueError(tr("srv.stats.kod_neplatny", lang))
     title = str(title or "").strip()[:200]
     if not title:
-        raise ValueError("Názov kódu nesmie byť prázdny.")
+        raise ValueError(tr("srv.stats.nazov_prazdny", lang))
     description = str(description or "").strip()[:2000]
     fix = str(fix or "").strip()[:2000]
     con = connect(cfg)
     try:
         r = con.execute("SELECT editable FROM fault_codes WHERE code=?", (code,)).fetchone()
         if r and r[0] == 0:
-            raise ValueError("Tento kód sa nedá upravovať.")
+            raise ValueError(tr("srv.stats.kod_needitovat", lang))
         con.execute("INSERT INTO fault_codes(code, title, description, fix, editable) VALUES(?,?,?,?,1) "
                     "ON CONFLICT(code) DO UPDATE SET title=excluded.title, description=excluded.description, fix=excluded.fix",
                     (code, title, description, fix))
@@ -1779,7 +1823,7 @@ def _tl_add(out, s, e, st):
 
 
 # ---------------------------------------------------------------- dotazové funkcie
-def coverage(cfg):
+def coverage(cfg, lang="sk"):
     con = connect(cfg)
     try:
         def first(cond):
@@ -1803,13 +1847,13 @@ def coverage(cfg):
                 "kalibracia": kal, "kwh_dom_do": _dstr(last_dom) if last_dom is not None else None,
                 "cop_zdroj": ("pevny_prietok" if cfg_flow(cfg) else "prietok") if fd["cop"] else None,
                 "cop_poznamka": None if fd["cop"] else
-                "COP sa počíta z prietoku vody a teplôt výstup/spiatočka; zatiaľ chýbajú platné údaje o prietoku (senzor hlási 6553,5 alebo nie je dostupný)."}
+                tr("srv.stats.cop_poznamka", lang)}
     finally:
         con.close()
 
 
-def get_day(cfg, date):
-    d = _pdate(date)
+def get_day(cfg, date, lang="sk"):
+    d = _pdate(date, lang)
     a, b = _bounds(d)
     con = connect(cfg)
     try:
@@ -1831,15 +1875,26 @@ def get_day(cfg, date):
                              "WHERE ts_start<? AND COALESCE(ts_stop, ?)>=? ORDER BY ts_start", (b, now, a)):
             c = dict(zip(("id", "ts_start", "ts_stop", "minutes", "f_max", "f_avg", "mode", "vonku", "tw2_max", "reason"), r))
             c["running"] = c["ts_stop"] is None
+            c["reason"] = _reason(c["reason"], lang)
             cycles.append(c)
         fc = _fc_map(con)
-        faults = [_fault_dict(r, fc, now) for r in con.execute(
+        faults = [_fault_dict(r, fc, now, lang) for r in con.execute(
             _FSEL + " WHERE ts_start<? AND COALESCE(ts_end, ?)>=? ORDER BY ts_start, id", (b, now, a))]
         return {"date": d.isoformat(), "hours": hours, "summary": summ, "cycles": cycles, "faults": faults,
                 "timeline": _timeline(cfg, con, a, b), "has_data": summ["hodin_s_datami"] > 0,
                 "kwh_zdroj": summ["kwh_zdroj"], "kalibracia_k": get_k(con), "prietok": get_prietok(con)}
     finally:
         con.close()
+
+
+_REASONS = {"odmrazovanie": "defrost", "TÚV": "dhw", "dosiahnutý cieľ": "target", "iné": "other"}
+
+
+def _reason(r, lang):
+    """Dôvod ukončenia cyklu sa ukladá po slovensky; na výstupe sa pre iný jazyk preloží."""
+    if lang == "sk" or r not in _REASONS:
+        return r
+    return tr("srv.stats.reason_" + _REASONS[r], lang)
 
 
 def _period(d, group):
@@ -1854,14 +1909,14 @@ def _period(d, group):
     return "%d-%02d" % (d.year, d.month), first, nxt - _dt.timedelta(days=1)
 
 
-def get_range(cfg, date_from, date_to, group="day"):
-    d1, d2 = _pdate(date_from), _pdate(date_to)
+def get_range(cfg, date_from, date_to, group="day", lang="sk"):
+    d1, d2 = _pdate(date_from, lang), _pdate(date_to, lang)
     if group not in ("day", "week", "month"):
-        raise ValueError("Neplatné zoskupenie (povolené: day, week, month).")
+        raise ValueError(tr("srv.stats.zoskupenie", lang))
     if d2 < d1:
-        raise ValueError("Dátum „do“ je pred dátumom „od“.")
+        raise ValueError(tr("srv.stats.do_pred_od", lang))
     if (d2 - d1).days > 366 * 40:
-        raise ValueError("Rozsah je príliš veľký.")
+        raise ValueError(tr("srv.stats.rozsah_velky", lang))
     periods = []
     d = d1
     while d <= d2:
@@ -1869,7 +1924,7 @@ def get_range(cfg, date_from, date_to, group="day"):
         if not periods or periods[-1][0] != key:
             periods.append([key, max(pf, d1), min(pt, d2)])
             if len(periods) > 800:
-                raise ValueError("Rozsah je príliš veľký (najviac 800 riadkov); zvoľ hrubšie zoskupenie.")
+                raise ValueError(tr("srv.stats.rozsah_800", lang))
         d += _dt.timedelta(days=1)
     a, b = _bounds(d1)[0], _bounds(d2)[1]
     con = connect(cfg)
@@ -1902,15 +1957,15 @@ def get_range(cfg, date_from, date_to, group="day"):
         con.close()
 
 
-def _label(d, today):
+def _label(d, today, lang="sk"):
     diff = (today - d).days
-    fixed = {0: "Dnes", 1: "Včera", 7: "Pred týždňom", 14: "Pred 2 týždňami", 30: "Pred mesiacom"}
+    fixed = {0: "dnes", 1: "vcera", 7: "tyzden", 14: "tyzdne2", 30: "mesiac"}
     if diff in fixed:
-        return fixed[diff]
-    for n, txt in ((1, "Pred rokom"), (2, "Pred 2 rokmi"), (3, "Pred 3 rokmi")):
+        return tr("srv.stats.lbl_" + fixed[diff], lang)
+    for n in (1, 2, 3):
         if d == _shift_years(today, n):
-            return txt
-    return _slk(d)
+            return tr("srv.stats.lbl_rok%d" % n, lang)
+    return _slk(d, lang)
 
 
 def _merge_hours(hours):
@@ -1937,33 +1992,33 @@ def _merge_hours(hours):
     return out
 
 
-def compare(cfg, dates):
+def compare(cfg, dates, lang="sk"):
     if isinstance(dates, str):
         dates = [x for x in re.split(r"[,\s]+", dates) if x]
     if not isinstance(dates, (list, tuple)):
-        raise ValueError("Dátumy musia byť zoznam.")
+        raise ValueError(tr("srv.stats.datumy_zoznam", lang))
     ds = []
     for x in dates:
-        d = _pdate(x)
+        d = _pdate(x, lang)
         if d not in ds:
             ds.append(d)
     if not 1 <= len(ds) <= 6:
-        raise ValueError("Porovnať možno 1 až 6 dní.")
+        raise ValueError(tr("srv.stats.porovnat", lang))
     today = _today()
     out = []
     for d in ds:
-        day = get_day(cfg, d.isoformat())
-        out.append({"date": d.isoformat(), "label": _label(d, today), "has_data": day["has_data"],
+        day = get_day(cfg, d.isoformat(), lang)
+        out.append({"date": d.isoformat(), "label": _label(d, today, lang), "has_data": day["has_data"],
                     "summary": day["summary"], "hours": _merge_hours(day["hours"])})
-    return {"dates": out, "metrics": METRICS}
+    return {"dates": out, "metrics": metrics(lang)}
 
 
 QUICK = (("-1d", "Včera", 1, 0), ("-7d", "Pred týždňom", 7, 0), ("-14d", "Pred 2 týždňami", 14, 0),
          ("-30d", "Pred mesiacom", 30, 0), ("-1y", "Pred rokom", 0, 1), ("-2y", "Pred 2 rokmi", 0, 2), ("-3y", "Pred 3 rokmi", 0, 3))
 
 
-def quick_dates(cfg, base=None):
-    b = _pdate(base) if base else _today()
+def quick_dates(cfg, base=None, lang="sk"):
+    b = _pdate(base, lang) if base else _today()
     con = connect(cfg)
     try:
         out = []
@@ -1971,7 +2026,7 @@ def quick_dates(cfg, base=None):
             d = _shift_years(b, years) if years else b - _dt.timedelta(days=days)
             a, e = _bounds(d)
             has = con.execute("SELECT 1 FROM hourly WHERE ts>=? AND ts<? AND (n IS NULL OR n>0) LIMIT 1", (a, e)).fetchone() is not None
-            out.append({"key": key, "label": label, "date": d.isoformat(), "has_data": has})
+            out.append({"key": key, "label": label if lang == "sk" else tr("srv.stats.q_" + key.lstrip("-"), lang), "date": d.isoformat(), "has_data": has})
         return out
     finally:
         con.close()
@@ -1994,6 +2049,12 @@ def _hdr(m):
     return "%s (%s)" % (m["label"], m["unit"]) if m["unit"] else m["label"]
 
 
+def _zdroj(z, lang):
+    if lang == "sk" or z not in ("odhad", "kalibrovany"):
+        return z or ""
+    return tr("srv.stats.zdroj_" + z, lang)
+
+
 def _csv(header, rows):
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
@@ -2004,6 +2065,8 @@ def _csv(header, rows):
 
 
 def export_csv(cfg, kind, **p):
+    lang = p.get("lang") or "sk"
+    METRICS = metrics(lang)
     """CSV text (oddeľovač ;, desatinná čiarka, začína BOM). kind: day (date|d), range (date_from|from, date_to|to, group), compare (dates|d)."""
     def g(*names):
         for n in names:
@@ -2012,33 +2075,32 @@ def export_csv(cfg, kind, **p):
         return None
     if kind == "day":
         d = g("date", "d", "day")
-        day = get_day(cfg, d or _today().isoformat())
-        header = ["Dátum", "Hodina"] + [_hdr(m) for m in METRICS]
+        day = get_day(cfg, d or _today().isoformat(), lang)
+        header = [tr("srv.stats.csv_datum", lang), tr("srv.stats.csv_hodina", lang)] + [_hdr(m) for m in METRICS]
         rows = [[day["date"], e["h"]] + [_num(e.get(m["key"]), m["decimals"]) for m in METRICS] for e in day["hours"]]
         return _csv(header, rows)
     if kind == "range":
         f, t = g("date_from", "from", "from_", "od"), g("date_to", "to", "do")
         if not f or not t:
-            raise ValueError("Chýba dátum od alebo do.")
-        r = get_range(cfg, f, t, g("group") or "day")
-        header = ["Obdobie", "Od", "Do"] + [_hdr(m) for m in METRICS if m["key"] != "n"] + \
-                 ["Stupňo-dni", "kWh na stupňo-deň", "Spotreba kal. alebo odhad (kWh)", "Zdroj spotreby", "COP kúrenie", "COP TÚV",
-                  "Dní s dátami", "Poruchy"]
+            raise ValueError(tr("srv.stats.csv_chyba_datum", lang))
+        r = get_range(cfg, f, t, g("group") or "day", lang)
+        header = [tr("srv.stats.csv_obdobie", lang), tr("srv.stats.csv_od", lang), tr("srv.stats.csv_do", lang)] + [_hdr(m) for m in METRICS if m["key"] != "n"] + \
+                 [tr("srv.stats.csv_" + x, lang) for x in ("hdd", "kwh_hdd", "kwh_spotreba", "zdroj", "cop_kurenie", "cop_tuv", "dni", "poruchy")]
         rows = []
-        for x in r["rows"] + [dict(r["totals"], key="Spolu", **{"from": f, "to": t})]:
+        for x in r["rows"] + [dict(r["totals"], key=tr("srv.stats.csv_spolu", lang), **{"from": f, "to": t})]:
             rows.append([x["key"], x["from"], x["to"]] + [_num(x.get(m["key"]), m["decimals"]) for m in METRICS if m["key"] != "n"] +
-                        [_num(x.get("hdd"), 2), _num(x.get("kwh_hdd"), 2), _num(x.get("kwh_spotreba"), 2), x.get("kwh_zdroj") or "",
+                        [_num(x.get("hdd"), 2), _num(x.get("kwh_hdd"), 2), _num(x.get("kwh_spotreba"), 2), _zdroj(x.get("kwh_zdroj"), lang),
                          _num(x.get("cop_kurenie"), 2), _num(x.get("cop_tuv"), 2), x.get("dni_s_datami", ""), x.get("poruch", "")])
         return _csv(header, rows)
     if kind == "compare":
-        c = compare(cfg, g("dates", "d") or [])
-        header = ["Dátum", "Označenie", "Hodina"] + [_hdr(m) for m in METRICS]
+        c = compare(cfg, g("dates", "d") or [], lang)
+        header = [tr("srv.stats.csv_datum", lang), tr("srv.stats.csv_oznacenie", lang), tr("srv.stats.csv_hodina", lang)] + [_hdr(m) for m in METRICS]
         rows = []
         for dd in c["dates"]:
             for e in dd["hours"]:
                 rows.append([dd["date"], dd["label"], e["h"]] + [_num(e.get(m["key"]), m["decimals"]) for m in METRICS])
         return _csv(header, rows)
-    raise ValueError("Neznámy druh exportu (povolené: day, range, compare).")
+    raise ValueError(tr("srv.stats.export_druh", lang))
 
 
 # ---------------------------------------------------------------- profil inštalácie (profil.py)
@@ -2046,8 +2108,9 @@ def configure(p=None):
     """Naplní entity, stĺpce hodín, metriky a model zariadenia z profilu (pri importe z profil.json alebo predvoleného profilu).
     Volá sa pri importe; testy ju môžu zavolať s iným profilom (a potom znova configure() pre pôvodný)."""
     global TC, INV, VALVE, DEFROST, THERMOSTAT, AGENT_TEMPS, MODEL, TAB_TA, TAB_LW, TAB_PEAK, FLOWCAL_ZDROJ
-    global ROOM_KEYS, HCOLS, AVG_KEYS, METRICS, METRIC_KEYS, _MDEC, _UPSERT, _SEL
+    global ROOM_KEYS, HCOLS, AVG_KEYS, METRICS, METRIC_KEYS, _MDEC, _UPSERT, _SEL, _PROFILE
     p = p if p is not None else profil.load()
+    _PROFILE = p
     TC = profil.esp_tc(p)
     INV = {v: k for k, v in TC.items()}
     VALVE = profil.device_entity("ventil", p)

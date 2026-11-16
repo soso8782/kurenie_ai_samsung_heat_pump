@@ -2,6 +2,8 @@
 """Web agenta kúrenia: stav, vypínač agenta, denný kalendár po hodinách, zásahy, upozornenia, prihlásenie."""
 import datetime, hashlib, hmac, html as _html, json, os, re, secrets, shutil, socket, sqlite3, sys, threading, time, unicodedata, urllib.request
 import profil
+import i18n
+from i18n import tr, tn
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -9,7 +11,7 @@ from common import (REF_ROOM, ROOM_NAMES, ROOMS, ROOT, S, TARGET_ROOMS, adb, bal
                     hour_stats, is_dry, load_cfg, local_midnight, save_cfg, set_state, tcq, cfg_int)
 from agent import ALLOWED, ROOM_TARGET_ENT, UNDO_MAX_AGE_S, call_llm, chat_reply, parse_room_target, set_room_target, undo, update_days
 import agent as _agent_mod
-import abtest, cfjwt, cftunnel, contacts, contacts_mqtt, dhw, interventions, notify, spotreba, temps, vonku
+import abtest, ha_api, ha_auth, cfjwt, cftunnel, contacts, contacts_mqtt, dhw, interventions, notify, spotreba, temps, vonku
 try:   # štatistiky (stats.py): ak modul chýba, web ostane funkčný a /api/stats/* vráti 503
     import stats
 except Exception:
@@ -23,8 +25,8 @@ PBKDF2_ITER = 200000
 # Zmena cieľovej izbovej teploty (web správcu aj chat používateľa idú cez agent.set_room_target): po úspešnej zmene sa vo vlákne
 # pošle upozornenie `cielova_zmena` všetkým zariadeniam. agent.py sa nemení - funkcia sa obalí tu (chat volá agent.set_room_target
 # cez globálnu premennú modulu agent, takže obal platí aj pre chat).
-def _set_room_target_notify(cfg, c, value, who):
-    res = _orig_set_room_target(cfg, c, value, who)
+def _set_room_target_notify(cfg, c, value, who, lang="sk"):
+    res = _orig_set_room_target(cfg, c, value, who, lang)
     try:
         threading.Thread(target=notify.target_changed, args=(dict(cfg), res.get("old"), res.get("new"), who),
                          name="notify-cielova-zmena", daemon=True).start()
@@ -81,9 +83,9 @@ def enrich_actions(c, runs):
 RUN_COLS = "id,ts,mode,status,stav,summary,advice,model,actions,error,tok_in,tok_out,cost"
 
 
-def status(cfg, role="admin", email=None):
+def status(cfg, role="admin", email=None, lang="sk"):
     if role != "admin":
-        return status_user(cfg, role, email)
+        return status_user(cfg, role, email, lang)
     c = adb(cfg)
     now = int(time.time())
     last = c.execute("SELECT %s FROM runs ORDER BY ts DESC LIMIT 1" % RUN_COLS).fetchone()
@@ -120,10 +122,11 @@ def status(cfg, role="admin", email=None):
     out["runs_today_llm"] = c.execute("SELECT count(*) FROM runs WHERE ts>=? AND status='ok' AND coalesce(model,'')!=''", (mid,)).fetchone()[0]
     out["runs_today_rutina"] = c.execute("SELECT count(*) FROM runs WHERE ts>=? AND status='rutina'", (mid,)).fetchone()[0]
     out["dry_run"] = is_dry(cfg)
+    out["ui_lang"] = i18n.home_lang(cfg)
     try:
         out["season"] = contacts.season(c)
         out["windows_open"] = [{"label": o["label"], "group": o["group"], "minutes": o["minutes"], "room": o["room"]} for o in contacts.open_now(c, now)]
-        out["ha"] = contacts.ha_status(cfg, c)
+        out["ha"] = contacts.ha_status(cfg, c, lang)
     except Exception:
         out["season"], out["windows_open"], out["ha"] = "zima", [], {"configured": False, "ok": False, "last_ok": None, "error": None, "count": None, "token_hint": ""}
     try:
@@ -148,6 +151,14 @@ def status(cfg, role="admin", email=None):
         out["collector_error"] = str(e)
     out["stats"] = stats_brief(cfg)
     out["profil_info"] = profil_info(cfg)
+    try:
+        ca = adb(cfg)
+        try:
+            out["ha_api"] = ha_api.key_info(ca)
+        finally:
+            ca.close()
+    except Exception:
+        out["ha_api"] = None
     try:   # živé hodnoty (COP teraz, výkon, spotreba); bez modulu štatistík alebo pri chybe None
         out["live"] = stats.live(cfg) if stats is not None and hasattr(stats, "live") else None
     except Exception:
@@ -163,7 +174,7 @@ def status(cfg, role="admin", email=None):
 ROOM_KEYS = tuple(k for k in ("vonku",) + tuple(ROOMS) + (REF_ROOM + "_z",) if k in S)
 
 
-def status_user(cfg, role, email):
+def status_user(cfg, role, email, lang="sk"):
     """Filtrovaný stav pre rolu `user`: teploty, sezóna, otvorené okná, krátky text posledného behu. Žiadne kredity, kľúče, HA, tunel."""
     now = int(time.time())
     c = adb(cfg)
@@ -191,7 +202,7 @@ def status_user(cfg, role, email):
         rows = tcq(cfg, "SELECT entity, value FROM samples WHERE ts=? AND entity IN (%s)" % ",".join("?" * len(names)), (ls, *names))
         out["current"] = {e: v for e, v in rows}
     except Exception as e:
-        out["collector_error"] = "Teploty zo zberača nie sú dostupné."
+        out["collector_error"] = tr("srv.app.teploty_zberac", lang)
     return out
 
 
@@ -260,7 +271,7 @@ def access_settings(c):
     return (td if re.fullmatch(cfjwt.TEAM_RE, td) else ""), (aud if re.fullmatch(cfjwt.AUD_RE, aud) else "")
 
 
-def access_config(cfg, body):
+def access_config(cfg, body, lang="sk"):
     """POST /api/access_config {team_domain, aud} (len správca): ručné nastavenie overovania Cloudflare Access; prázdne = zmazať."""
     td = body.get("team_domain")
     aud = body.get("aud")
@@ -269,16 +280,16 @@ def access_config(cfg, body):
     if aud is None:
         aud = ""
     if not isinstance(td, str) or not isinstance(aud, str):
-        return 400, {"error": "Neplatné hodnoty."}
+        return 400, {"error": tr("srv.app.neplatne_hodnoty", lang)}
     td = td.strip().lower()
     aud = aud.strip()
     td = re.sub(r"^https?://", "", td).rstrip("/")
     if td and not re.fullmatch(cfjwt.TEAM_RE, td):
-        return 400, {"error": "Team domain má vyzerať ako moj-tim.cloudflareaccess.com."}
+        return 400, {"error": tr("srv.app.team_domain", lang)}
     if aud and not re.fullmatch(cfjwt.AUD_RE, aud):
-        return 400, {"error": "AUD tag má mať 32 až 128 znakov (písmená a čísla)."}
+        return 400, {"error": tr("srv.app.aud_tag", lang)}
     if bool(td) != bool(aud):
-        return 400, {"error": "Vyplň obe polia (Team domain aj AUD tag), alebo obe nechaj prázdne."}
+        return 400, {"error": tr("srv.app.vyplnit_obe", lang)}
     c = adb(cfg)
     try:
         set_state(c, "cf_team_domain", td)
@@ -288,16 +299,16 @@ def access_config(cfg, body):
     return 200, {"ok": True, "tunnel": tunnel_status(cfg)}
 
 
-def tunnel_auto(cfg, body):
+def tunnel_auto(cfg, body, lang="sk"):
     """POST /api/tunnel_setup {cf_token, hostname, emails, no_access, save_api_token}: nastaví tunel, Access a DNS cez Cloudflare API."""
     if is_dry(cfg):
-        return 400, {"error": "Testovacie prostredie (DRY_RUN): tunel sa tu nemení."}
+        return 400, {"error": tr("srv.app.dry_tunel", lang)}
     log = []
     try:
-        tk, host, ids = cftunnel.setup(body.get("cf_token"), body.get("hostname"), body.get("emails"), bool(body.get("no_access")), log)
+        tk, host, ids = cftunnel.setup(body.get("cf_token"), body.get("hostname"), body.get("emails"), bool(body.get("no_access")), log, lang)
     except cftunnel.CfError as e:
         return 400, {"error": str(e), "steps": log}
-    code, out = tunnel_save(cfg, {"token": tk})
+    code, out = tunnel_save(cfg, {"token": tk}, lang)
     if code != 200:
         return code, dict(out, steps=log)
     c = adb(cfg)
@@ -317,17 +328,17 @@ def tunnel_auto(cfg, body):
         c.close()
     if body.get("save_api_token") in (True, 1, "1", "true"):
         write_secret(CF_API_FILE, str(body.get("cf_token")).strip())
-        log.append("API token uložený na server")
+        log.append(tr("srv.app.api_token_ulozeny", lang))
     out["tunnel"] = tunnel_status(cfg)
     out["steps"] = log
     out["host"] = host
     return 200, out
 
 
-def tunnel_api(cfg, body):
+def tunnel_api(cfg, body, lang="sk"):
     """POST /api/tunnel_api {cf_token}: uloží/prepíše Cloudflare API token (po overení); prázdny reťazec ho zmaže. Token sa nevracia."""
     if is_dry(cfg):
-        return 400, {"error": "Testovacie prostredie (DRY_RUN): API kľúč sa tu nemení."}
+        return 400, {"error": tr("srv.app.dry_api_kluc", lang)}
     tk = str(body.get("cf_token") or "").strip()
     if not tk:
         try:
@@ -336,7 +347,7 @@ def tunnel_api(cfg, body):
             pass
         return 200, {"ok": True, "tunnel": tunnel_status(cfg)}
     try:
-        cftunnel.verify_token(tk)
+        cftunnel.verify_token(tk, lang)
     except cftunnel.CfError as e:
         return 400, {"error": str(e)}
     write_secret(CF_API_FILE, tk)
@@ -352,26 +363,26 @@ def sync_result(ok, text, skipped=False):
     return d
 
 
-def users_sync(cfg, c):
+def users_sync(cfg, c, lang="sk"):
     """Prenesie zoznam e-mailov do Access aplikácie. Nikdy nevyhodí výnimku; výsledok sa uloží do state.users_sync."""
     emails = user_emails(c)
     app_id, acc = get_state(c, "cf_access_app_id", ""), get_state(c, "cf_account_id", "")
     tk = read_api_token()
     if not app_id:
-        res = sync_result(False, "Cloudflare Access nie je zapnutý, zoznam sa v Cloudflare nemení.", True)
+        res = sync_result(False, tr("srv.app.cf_access_vypnuty", lang), True)
     elif not tk:
-        res = sync_result(False, "Ulož Cloudflare API token, aby sa zmena prejavila aj v Cloudflare Access.", True)
+        res = sync_result(False, tr("srv.app.cf_ulozit_token", lang), True)
     elif not emails:
-        res = sync_result(False, "Zoznam e-mailov je prázdny, Cloudflare Access sa nemení.", True)
+        res = sync_result(False, tr("srv.app.cf_prazdny_zoznam", lang), True)
     elif is_dry(cfg):
-        res = sync_result(False, "Testovacie prostredie (DRY_RUN): synchronizácia s Cloudflare sa preskočila.", True)
+        res = sync_result(False, tr("srv.app.dry_sync", lang), True)
     else:
         try:
-            res = sync_result(True, cftunnel.sync_emails(tk, acc, app_id, emails))
+            res = sync_result(True, cftunnel.sync_emails(tk, acc, app_id, emails, lang))
         except cftunnel.CfError as e:
-            res = sync_result(False, "Cloudflare Access sa nepodarilo aktualizovať: %s" % e)
+            res = sync_result(False, tr("srv.app.cf_aktualizacia_chyba", lang, err=e))
         except Exception as e:
-            res = sync_result(False, "Cloudflare Access sa nepodarilo aktualizovať: %s" % type(e).__name__)
+            res = sync_result(False, tr("srv.app.cf_aktualizacia_chyba", lang, err=type(e).__name__))
     set_state(c, "users_sync", json.dumps(dict(res, ts=int(time.time())), ensure_ascii=False))
     return res
 
@@ -380,79 +391,79 @@ def users_list(c):
     return [{"email": r[0], "role": r[1], "added_ts": r[2]} for r in c.execute("SELECT email, role, added_ts FROM users ORDER BY added_ts, email")]
 
 
-def users_get(cfg, c):
+def users_get(cfg, c, lang="sk"):
     try:
         sync = json.loads(get_state(c, "users_sync", "") or "null")
     except ValueError:
         sync = None
     if not sync:
-        sync = sync_result(None, "Zatiaľ nesynchronizované.")
+        sync = sync_result(None, tr("srv.app.zatial_nesync", lang))
     return {"users": users_list(c), "sync": sync}
 
 
-def users_set(cfg, c, body):
+def users_set(cfg, c, body, lang="sk"):
     """POST /api/users {email, role}: pridá používateľa alebo zmení rolu."""
     try:
-        em = cftunnel.norm_email(body.get("email"))
+        em = cftunnel.norm_email(body.get("email"), lang)
     except ValueError as e:
         return 400, {"error": str(e)}
     role = body.get("role")
     if role not in ("admin", "user"):
-        return 400, {"error": "Neplatná rola (admin alebo user)."}
+        return 400, {"error": tr("srv.app.neplatna_rola", lang)}
     cur = c.execute("SELECT role FROM users WHERE email=?", (em,)).fetchone()
     if cur and cur[0] == "admin" and role != "admin" and c.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0] <= 1:
-        return 400, {"error": "Posledného správcu nemožno degradovať."}
+        return 400, {"error": tr("srv.app.posl_spravca_degrad", lang)}
     if cur:
         c.execute("UPDATE users SET role=? WHERE email=?", (role, em))
     else:
         c.execute("INSERT INTO users(email, role, added_ts) VALUES(?,?,?)", (em, role, int(time.time())))
     c.commit()
-    return 200, {"ok": True, "users": users_list(c), "sync": users_sync(cfg, c)}
+    return 200, {"ok": True, "users": users_list(c), "sync": users_sync(cfg, c, lang)}
 
 
-def users_delete(cfg, c, body):
+def users_delete(cfg, c, body, lang="sk"):
     """POST /api/users/delete {email}."""
     try:
-        em = cftunnel.norm_email(body.get("email"))
+        em = cftunnel.norm_email(body.get("email"), lang)
     except ValueError as e:
         return 400, {"error": str(e)}
     cur = c.execute("SELECT role FROM users WHERE email=?", (em,)).fetchone()
     if not cur:
-        return 404, {"error": "Takýto používateľ neexistuje."}
+        return 404, {"error": tr("srv.app.pouzivatel_neexistuje", lang)}
     if cur[0] == "admin" and c.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0] <= 1:
-        return 400, {"error": "Posledného správcu nemožno odstrániť."}
+        return 400, {"error": tr("srv.app.posl_spravca_odstr", lang)}
     c.execute("DELETE FROM users WHERE email=?", (em,))
     c.commit()
-    return 200, {"ok": True, "users": users_list(c), "sync": users_sync(cfg, c)}
+    return 200, {"ok": True, "users": users_list(c), "sync": users_sync(cfg, c, lang)}
 
 
-def room_target_post(cfg, body, who):
+def room_target_post(cfg, body, who, lang="sk"):
     """POST /api/room_target {value} (iba správca)."""
     try:
-        v = parse_room_target(body.get("value"))
+        v = parse_room_target(body.get("value"), lang)
     except ValueError as e:
         return 400, {"error": str(e)}
     c = adb(cfg)
     try:
-        res = set_room_target(cfg, c, v, who)
+        res = set_room_target(cfg, c, v, who, lang)
     except RuntimeError as e:
         return 502, {"error": str(e)}
     finally:
         c.close()
     out = {"ok": True, "value": res["new"]}
     if res["dry"]:
-        out["note"] = "Testovacie prostredie (DRY_RUN): hodnota sa do čerpadla nezapísala."
+        out["note"] = tr("srv.app.dry_hodnota", lang)
     return 200, out
 
 
-def user_target_post(cfg, body, email):
+def user_target_post(cfg, body, email, lang="sk"):
     """POST /api/user_target {value} (používateľ aj správca): zmena cieľa s mantinelmi chatu (20–24,5 po 0,5, ±1,0 naraz,
     raz za 30 min, nie počas A/B testu; zdieľa limit s chatom). Vracia {"ok","text","target"}."""
     c = adb(cfg)
     try:
-        ok, text = _agent_mod.chat_room_target(cfg, c, body.get("value"), email or "používateľ", int(time.time()))
+        ok, text = _agent_mod.chat_room_target(cfg, c, body.get("value"), email or "používateľ", int(time.time()), lang)
     except Exception:
-        ok, text = False, "Zmenu teploty som nevykonal: nastala chyba. Skús to neskôr."
+        ok, text = False, tr("srv.app.zmena_teploty_chyba", lang)
     finally:
         c.close()
     try:
@@ -478,11 +489,11 @@ def _series_rows(cfg, entity, since, bin_s):
     return [[int(b), round(float(v), 2)] for b, v in rows if v is not None and abs(v) <= 6000]
 
 
-def series_get(cfg, p):
+def series_get(cfg, p, lang="sk"):
     """GET /api/series?k=&days= -> graf izby/bojlera (priemery v koši, cieľ, štatistika)."""
     k = (p.get("k", [""])[0] or "").strip()
     if k not in SERIES_KEYS:
-        return 400, {"error": "Neznámy kľúč série."}
+        return 400, {"error": tr("srv.app.neznamy_kluc_serie", lang)}
     try:
         days = int(float(p.get("days", ["3"])[0]))
     except (TypeError, ValueError):
@@ -500,42 +511,42 @@ def series_get(cfg, p):
     return 200, {"k": k, "days": days, "from": since, "to": now, "bin_s": bin_s, "points": points, "target": target, "stats": stats_}
 
 
-def tuv_boost_post(cfg, body, who):
+def tuv_boost_post(cfg, body, who, lang="sk"):
     """POST /api/tuv_boost {action:"start"|"stop", target} (správca aj používateľ). Vracia {"ok","text","tuv"}."""
     action = body.get("action")
     if action not in ("start", "stop"):
-        return 400, {"error": "Neplatná akcia."}
+        return 400, {"error": tr("srv.app.neplatna_akcia", lang)}
     c = adb(cfg)
     try:
         try:
-            ok, text = dhw.manual_start(cfg, c, body.get("target"), who) if action == "start" else dhw.manual_stop(cfg, c, who)
+            ok, text = dhw.manual_start(cfg, c, body.get("target"), who, lang=lang) if action == "start" else dhw.manual_stop(cfg, c, who, lang)
         except Exception as e:
-            ok, text = False, "Nastala chyba: %s" % e
+            ok, text = False, tr("srv.app.nastala_chyba", lang, err=e)
         return 200, {"ok": bool(ok), "text": str(text), "tuv": dhw.manual_status(c)}
     finally:
         c.close()
 
 
-def tuv_target_post(cfg, body, who):
+def tuv_target_post(cfg, body, who, lang="sk"):
     """POST /api/tuv_target {value} (iba správca): trvalý cieľ TÚV 40-52."""
     if "value" not in body:
-        return 400, {"error": "Chýba hodnota."}
+        return 400, {"error": tr("srv.app.chyba_hodnota", lang)}
     c = adb(cfg)
     try:
         try:
-            ok, text = dhw.set_target_manual(cfg, c, body.get("value"), who)
+            ok, text = dhw.set_target_manual(cfg, c, body.get("value"), who, lang)
         except Exception as e:
-            ok, text = False, "Nastala chyba: %s" % e
+            ok, text = False, tr("srv.app.nastala_chyba", lang, err=e)
         return 200, {"ok": bool(ok), "text": str(text), "tuv": dhw.manual_status(c)}
     finally:
         c.close()
 
 
-def tunnel_save(cfg, body):
+def tunnel_save(cfg, body, lang="sk"):
     """POST /api/tunnel {token} – uloží token a spustí tunel; prázdny token tunel vypne a zmaže."""
     tk = str(body.get("token") or "").strip()
     if is_dry(cfg):
-        return 400, {"error": "Testovacie prostredie (DRY_RUN): tunel sa tu nemení."}
+        return 400, {"error": tr("srv.app.dry_tunel", lang)}
     if not tk:
         _systemctl("disable", "--now", CF_UNIT)
         try:
@@ -546,9 +557,9 @@ def tunnel_save(cfg, body):
     if tk.lower().startswith("cloudflared") or " " in tk:
         tk = tk.split()[-1]   # používateľ vložil celý príkaz „cloudflared service install <token>“
     if not re.fullmatch(r"[A-Za-z0-9+/=_\-\.]{40,2048}", tk):
-        return 400, {"error": "Token nevyzerá ako token Cloudflare tunela (dlhý text z Zero Trust → Networks → Tunnels)."}
+        return 400, {"error": tr("srv.app.token_tunela", lang)}
     if not tunnel_status()["installed"]:
-        return 500, {"error": "Na serveri nie je nainštalovaný cloudflared."}
+        return 500, {"error": tr("srv.app.cloudflared_chyba", lang)}
     try:
         same = open(CF_TOKEN_FILE, encoding="utf-8").read().strip() == tk
     except OSError:
@@ -648,24 +659,24 @@ def models():
 MODEL_RE = r"[A-Za-z0-9_\-\.:/]{3,120}"
 
 
-def save_settings(cfg, body):
+def save_settings(cfg, body, lang="sk"):
     upd, state_upd = {}, {}
     key = body.get("api_key")
     if key is not None:
         key = str(key).strip()
         if key and (len(key) < 20 or len(key) > 300 or not re.fullmatch(r"[A-Za-z0-9_\-\.]+", key)):
-            return 400, {"error": "Kľúč nevyzerá ako platný kľúč OpenRouter (začína sk-or-…)."}
+            return 400, {"error": tr("srv.app.kluc_openrouter", lang)}
         upd["OPENROUTER_API_KEY"] = key
     model = body.get("model")
     if model is not None:
         model = str(model).strip()
         if not re.fullmatch(MODEL_RE, model) or "/" not in model:
-            return 400, {"error": "Neplatný názov modelu (očakávam tvar výrobca/model)."}
+            return 400, {"error": tr("srv.app.nazov_modelu", lang)}
         upd["OPENROUTER_MODEL"] = model
     if body.get("fallback_model") is not None:
         fb = str(body["fallback_model"]).strip()
         if fb and (not re.fullmatch(MODEL_RE, fb) or "/" not in fb):
-            return 400, {"error": "Neplatný názov záložného modelu (očakávam tvar výrobca/model alebo prázdne)."}
+            return 400, {"error": tr("srv.app.nazov_zalozneho", lang)}
         upd["OPENROUTER_FALLBACK_MODEL"] = fb
     iv = body.get("interval")
     if iv is not None:
@@ -674,7 +685,7 @@ def save_settings(cfg, body):
         except (TypeError, ValueError):
             iv = 0
         if iv not in (15, 20, 30, 60, 120, 180):
-            return 400, {"error": "Neplatný interval."}
+            return 400, {"error": tr("srv.app.neplatny_interval", lang)}
         upd["INTERVAL_MIN"] = str(iv)
     if body.get("llm_max_gap_h") is not None:
         try:
@@ -682,30 +693,35 @@ def save_settings(cfg, body):
         except (TypeError, ValueError):
             g = 0
         if not 1 <= g <= 12:
-            return 400, {"error": "Najdlhšia pauza medzi volaniami modelu musí byť 1 až 12 hodín."}
+            return 400, {"error": tr("srv.app.pauza_llm", lang)}
         upd["LLM_MAX_GAP_H"] = str(g)
     if body.get("notify_url") is not None:
         u = str(body["notify_url"]).strip()
         if u and (len(u) > 500 or not re.fullmatch(r"https?://[^\s]+", u)):
-            return 400, {"error": "Adresa upozornení musí začínať http:// alebo https:// (alebo ju nechaj prázdnu)."}
+            return 400, {"error": tr("srv.app.adresa_upozorneni", lang)}
         upd["NOTIFY_URL"] = u
     if body.get("ha_url") is not None:
         u = str(body["ha_url"]).strip().rstrip("/")
         if u and (len(u) > 300 or not re.fullmatch(r"https?://[^\s]+", u)):
-            return 400, {"error": "Adresa Home Assistanta musí začínať http:// alebo https://."}
+            return 400, {"error": tr("srv.app.adresa_ha", lang)}
         upd["HA_URL"] = u
     if body.get("ha_token") is not None:
         tk = str(body["ha_token"]).strip()
         if tk and (len(tk) < 20 or len(tk) > 2048 or not re.fullmatch(r"[A-Za-z0-9_\-\.=]+", tk)):
-            return 400, {"error": "Token nevyzerá ako dlhodobý prístupový token Home Assistanta."}
+            return 400, {"error": tr("srv.app.token_ha", lang)}
         upd["HA_TOKEN"] = tk
+    if body.get("ui_lang") is not None:
+        ul = str(body["ui_lang"]).strip().lower()
+        if ul not in i18n.known_langs():
+            return 400, {"error": tr("srv.app.neplatny_jazyk", lang)}
+        upd["UI_LANG"] = ul
     if body.get("dhw_plan") is not None:
         v = body["dhw_plan"]
         if isinstance(v, str):
             v = v.strip().lower() in ("1", "true", "yes", "on")
         state_upd["dhw_plan"] = "1" if v else "0"
     if not upd and not state_upd:
-        return 400, {"error": "Nič na uloženie."}
+        return 400, {"error": tr("srv.app.nic_na_ulozenie", lang)}
     if upd:
         save_cfg(upd)
     c = adb(cfg)
@@ -713,18 +729,20 @@ def save_settings(cfg, body):
         set_state(c, k, v)   # vypnutie plánovača počas okna: agent (strážca) vráti pôvodný cieľ TÚV do ~1 min
     if "INTERVAL_MIN" in upd:
         set_state(c, "next_run", "0")   # agent si pri najbližšej slučke prepočíta čas ďalšieho behu
+    hl = i18n.home_lang(cfg)
     what = ", ".join(x for x in (
-        "kľúč OpenRouter" if "OPENROUTER_API_KEY" in upd else "",
-        ("model " + upd["OPENROUTER_MODEL"]) if "OPENROUTER_MODEL" in upd else "",
-        ("záložný model " + (upd["OPENROUTER_FALLBACK_MODEL"] or "vypnutý")) if "OPENROUTER_FALLBACK_MODEL" in upd else "",
-        ("interval %s min" % upd["INTERVAL_MIN"]) if "INTERVAL_MIN" in upd else "",
-        ("najdlhšia pauza medzi volaniami modelu %s h" % upd["LLM_MAX_GAP_H"]) if "LLM_MAX_GAP_H" in upd else "",
-        ("adresa upozornení " + ("nastavená" if upd["NOTIFY_URL"] else "zmazaná")) if "NOTIFY_URL" in upd else "",
-        ("adresa Home Assistanta " + ("nastavená" if upd["HA_URL"] else "zmazaná")) if "HA_URL" in upd else "",
-        ("token Home Assistanta " + ("nastavený" if upd["HA_TOKEN"] else "zmazaný")) if "HA_TOKEN" in upd else "",
-        ("plánovač ohrevu vody " + ("zapnutý" if state_upd["dhw_plan"] == "1" else "vypnutý")) if "dhw_plan" in state_upd else "") if x)
+        tr("srv.app.nast_kluc", hl) if "OPENROUTER_API_KEY" in upd else "",
+        tr("srv.app.nast_model", hl, v=upd["OPENROUTER_MODEL"]) if "OPENROUTER_MODEL" in upd else "",
+        tr("srv.app.nast_zalozny", hl, v=upd["OPENROUTER_FALLBACK_MODEL"] or tr("srv.app.nast_vypnuty", hl)) if "OPENROUTER_FALLBACK_MODEL" in upd else "",
+        tr("srv.app.nast_interval", hl, v=upd["INTERVAL_MIN"]) if "INTERVAL_MIN" in upd else "",
+        tr("srv.app.nast_pauza", hl, v=upd["LLM_MAX_GAP_H"]) if "LLM_MAX_GAP_H" in upd else "",
+        tr("srv.app.nast_adresa_upoz", hl, v=tr("srv.app.nast_nastavena" if upd["NOTIFY_URL"] else "srv.app.nast_zmazana", hl)) if "NOTIFY_URL" in upd else "",
+        tr("srv.app.nast_adresa_ha", hl, v=tr("srv.app.nast_nastavena" if upd["HA_URL"] else "srv.app.nast_zmazana", hl)) if "HA_URL" in upd else "",
+        tr("srv.app.nast_token_ha", hl, v=tr("srv.app.nast_nastaveny" if upd["HA_TOKEN"] else "srv.app.nast_zmazany", hl)) if "HA_TOKEN" in upd else "",
+        tr("srv.app.nast_plan", hl, v=tr("srv.app.nast_zapnuty" if state_upd["dhw_plan"] == "1" else "srv.app.nast_vypnuty", hl)) if "dhw_plan" in state_upd else "",
+        tr("srv.app.nast_jazyk", hl, v=upd["UI_LANG"]) if "UI_LANG" in upd else "") if x)
     c.execute("INSERT INTO runs(ts,mode,status,stav,summary,actions) VALUES(?,?,?,?,?,?)",
-              (int(time.time()), get_state(c, "mode", "advise"), "info", None, "Nastavenia zmenené cez web: " + what, "[]"))
+              (int(time.time()), get_state(c, "mode", "advise"), "info", None, tr("srv.app.nast_log", hl, v=what), "[]"))
     c.commit(); c.close()
     return 200, {"ok": True}
 
@@ -733,24 +751,24 @@ MQTT_HOST_RE = r"[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?"
 MQTT_NAME_RE = r"[A-Za-z0-9._@\-]+"
 
 
-def mqtt_validate(body, cfg):
+def mqtt_validate(body, cfg, lang="sk"):
     """Spoločná kontrola polí MQTT. -> (chyba, hodnoty). Prázdne heslo = uložené heslo z configu (hodnota sa nikdy nevracia klientovi)."""
     host = str(body.get("host") or "").strip()
     if not host or len(host) > 253 or not re.fullmatch(MQTT_HOST_RE, host):
-        return "Adresa brokera musí byť IP adresa alebo názov počítača (1 až 253 znakov, bez medzier).", None
+        return tr("srv.app.mqtt_adresa", lang), None
     raw = body.get("port")
     try:
         port = int(str(raw).strip()) if raw not in (None, "") else 1883
     except ValueError:
         port = 0
     if not 1 <= port <= 65535:
-        return "Port musí byť číslo od 1 do 65535.", None
+        return tr("srv.app.mqtt_port", lang), None
     user = str(body.get("user") or "").strip()
     if user and (len(user) > 64 or not re.fullmatch(MQTT_NAME_RE, user)):
-        return "Používateľ smie obsahovať len písmená, číslice a znaky . _ - @ (najviac 64).", None
+        return tr("srv.app.mqtt_user", lang), None
     base = str(body.get("base") or "").strip() or "zigbee2mqtt"
     if len(base) > 100 or base.startswith("/") or base.endswith("/") or not re.fullmatch(MQTT_NAME_RE + r"(/" + MQTT_NAME_RE + ")*", base):
-        return "Základná téma smie obsahovať len písmená, číslice a znaky . _ - @ a nesmie začínať ani končiť lomítkom.", None
+        return tr("srv.app.mqtt_base", lang), None
     pw = body.get("pass")
     if pw is None or pw == "":
         pw = cfg.get("MQTT_PASS", "")
@@ -759,7 +777,7 @@ def mqtt_validate(body, cfg):
         pw = str(pw)
         new_pw = True
         if len(pw) > 128 or any(ord(ch) < 32 or ord(ch) == 127 for ch in pw) or pw != pw.strip() or pw[0] in "\"'" or pw[-1] in "\"'":
-            return "Heslo je neplatné (najviac 128 znakov, bez riadiacich znakov, medzier na okrajoch a úvodzoviek na okrajoch).", None
+            return tr("srv.app.mqtt_heslo", lang), None
     return None, {"host": host, "port": port, "user": user, "base": base, "pass": pw, "new_pass": new_pw}
 
 
@@ -786,8 +804,8 @@ def mqtt_get(cfg, c):
                        "last_contact": num("mqtt_last_contact"), "error": get_state(c, "mqtt_error", "") or "", "matched": matched}}
 
 
-def mqtt_post(cfg, c, body):
-    err, v = mqtt_validate(body, cfg)
+def mqtt_post(cfg, c, body, lang="sk"):
+    err, v = mqtt_validate(body, cfg, lang)
     if err:
         return 400, {"error": err}
     upd = {"MQTT_HOST": v["host"], "MQTT_PORT": str(v["port"]), "MQTT_USER": v["user"], "MQTT_BASE": v["base"]}
@@ -836,9 +854,9 @@ def ims_import(cfg, body, token):
     return 200, {"ok": True, "spolu_hodin": len(data)}
 
 
-def mqtt_test(cfg, body):
+def mqtt_test(cfg, body, lang="sk"):
     """Skúšobné pripojenie priamo z webu: CONNECT, SUBSCRIBE `base/+`, 3 s počúva. Konfiguráciu nemení, heslo sa do odpovede nedostane."""
-    err, v = mqtt_validate(body, cfg)
+    err, v = mqtt_validate(body, cfg, lang)
     if err:
         return {"ok": False, "text": err}
     sock = None
@@ -848,11 +866,11 @@ def mqtt_test(cfg, body):
         sock.sendall(contacts_mqtt.build_connect("kurenie-test-%d" % (int(time.time()) % 100000), v["user"], v["pass"]))
         t, _, rb = contacts_mqtt.read_packet(sock)
         if t != 2 or len(rb) < 2:
-            return {"ok": False, "text": "Na tejto adrese neodpovedá MQTT broker."}
+            return {"ok": False, "text": tr("srv.app.mqtt_nie_broker", lang)}
         if rb[1] != 0:
-            why = {1: "Broker nepodporuje túto verziu MQTT.", 2: "Broker odmietol identifikátor klienta.", 3: "Broker je dočasne nedostupný.",
-                   4: "Nesprávne meno alebo heslo.", 5: "Prihlásenie bolo zamietnuté (nesprávne meno alebo heslo, alebo chýbajúce oprávnenie)."}
-            return {"ok": False, "text": why.get(rb[1], "Broker odmietol pripojenie (kód %s)." % rb[1])}
+            why = {1: tr("srv.app.mqtt_verzia", lang), 2: tr("srv.app.mqtt_klient_id", lang), 3: tr("srv.app.mqtt_nedostupny_docasne", lang),
+                   4: tr("srv.app.mqtt_heslo_zle", lang), 5: tr("srv.app.mqtt_zamietnute", lang)}
+            return {"ok": False, "text": why.get(rb[1], tr("srv.app.mqtt_odmietol", lang, code=rb[1]))}
         sock.sendall(contacts_mqtt.build_subscribe(1, v["base"] + "/+"))
         names, end = set(), time.time() + 3
         while True:
@@ -870,59 +888,59 @@ def mqtt_test(cfg, body):
                     names.add(topic[len(v["base"]) + 1:])
         if names:
             n = len(names)
-            return {"ok": True, "text": "Pripojené, zachytené správy z %d %s." % (n, "zariadenia" if n == 1 else "zariadení")}
-        return {"ok": True, "text": "Pripojené, no za 3 s neprišla žiadna správa. Okná sa objavia po prvej zmene; skontroluj aj základnú tému."}
+            return {"ok": True, "text": tn("srv.app.mqtt_zachytene", n, lang)}
+        return {"ok": True, "text": tr("srv.app.mqtt_ziadna_sprava", lang)}
     except socket.gaierror:
-        return {"ok": False, "text": "Adresu brokera sa nepodarilo nájsť. Skontroluj ju."}
+        return {"ok": False, "text": tr("srv.app.mqtt_adresa_nenajdena", lang)}
     except ConnectionRefusedError:
-        return {"ok": False, "text": "Broker odmieta spojenie. Skontroluj adresu a port."}
+        return {"ok": False, "text": tr("srv.app.mqtt_odmieta", lang)}
     except (socket.timeout, TimeoutError):
-        return {"ok": False, "text": "Broker neodpovedal včas (časový limit)."}
+        return {"ok": False, "text": tr("srv.app.mqtt_timeout", lang)}
     except ConnectionError:
-        return {"ok": False, "text": "Broker zatvoril spojenie. Skontroluj port a prihlasovacie údaje."}
+        return {"ok": False, "text": tr("srv.app.mqtt_zatvoril", lang)}
     except (OSError, ValueError):
-        return {"ok": False, "text": "Broker je nedostupný alebo odpovedal nezrozumiteľne."}
+        return {"ok": False, "text": tr("srv.app.mqtt_nedostupny", lang)}
     finally:
         if sock:
             sock.close()
 
 
-def contacts_get(cfg, c):
+def contacts_get(cfg, c, lang="sk"):
     now = int(time.time())
     gs, ungrouped = contacts.tree(c, now)
     return {"season": contacts.season(c), "notify_min": contacts.notify_min(c), "repeat_min": contacts.repeat_min(c),
-            "ha": contacts.ha_status(cfg, c), "other_group_id": contacts.other_id(c), "groups": gs, "ungrouped": ungrouped}
+            "ha": contacts.ha_status(cfg, c, lang), "other_group_id": contacts.other_id(c), "groups": gs, "ungrouped": ungrouped}
 
 
-def contacts_post(cfg, c, what, body):
+def contacts_post(cfg, c, what, body, lang="sk"):
     """POST /api/contacts/{settings|sensor|group|group_delete}. Neplatný vstup = 400 s textom po slovensky."""
     try:
         if what == "settings":
             old = contacts.season(c)
-            txt = contacts.save_settings(c, body)
+            txt = contacts.save_settings(c, body, lang)
             if contacts.season(c) != old:
                 c.execute("INSERT INTO runs(ts,mode,status,stav,summary,actions) VALUES(?,?,?,?,?,?)",
-                          (int(time.time()), get_state(c, "mode", "advise"), "info", None, "Sezóna zmenená cez web: %s → %s" % (old, contacts.season(c)), "[]"))
+                          (int(time.time()), get_state(c, "mode", "advise"), "info", None, tr("srv.app.sezona_log", i18n.home_lang(cfg), old=old, new=contacts.season(c)), "[]"))
                 c.commit()
             return 200, {"ok": True}
         if what == "sensor":
             eid = body.get("entity_id")
             if not isinstance(eid, str) or not eid:
-                return 400, {"error": "Chýba senzor."}
+                return 400, {"error": tr("srv.app.chyba_senzor", lang)}
             kw = {k: body[k] for k in ("alias", "group_id", "enabled", "note") if k in body}
-            contacts.update_contact(c, eid, **kw)
+            contacts.update_contact(c, eid, lang=lang, **kw)
             return 200, {"ok": True}
         if what == "group":
             gid = body.get("id")
             if gid is not None and (isinstance(gid, bool) or not isinstance(gid, int)):
-                return 400, {"error": "Neplatné id skupiny."}
-            nid = contacts.group_save(c, body.get("name"), body.get("room"), body.get("notify_min"), gid)
+                return 400, {"error": tr("srv.app.neplatne_id_skupiny", lang)}
+            nid = contacts.group_save(c, body.get("name"), body.get("room"), body.get("notify_min"), gid, lang)
             return 200, {"ok": True, "id": nid}
         if what == "group_delete":
             gid = body.get("id")
             if isinstance(gid, bool) or not isinstance(gid, int):
-                return 400, {"error": "Neplatné id skupiny."}
-            contacts.group_delete(c, gid)
+                return 400, {"error": tr("srv.app.neplatne_id_skupiny", lang)}
+            contacts.group_delete(c, gid, lang)
             temps.move_group(c, gid, contacts.other_id(c))   # aj teplotné čidlá z tejto skupiny idú do „Ostatné“
             return 200, {"ok": True}
     except ValueError as e:
@@ -930,22 +948,22 @@ def contacts_post(cfg, c, what, body):
     return 404, {"error": "not found"}
 
 
-def temps_get(cfg, c):
-    return temps.api_state(cfg, c)
+def temps_get(cfg, c, lang="sk"):
+    return temps.api_state(cfg, c, lang=lang)
 
 
-def temps_post(cfg, c, what, body):
+def temps_post(cfg, c, what, body, lang="sk"):
     """POST /api/temps/{sensor|settings}. Neplatný vstup = 400 s textom po slovensky."""
     try:
         if what == "settings":
-            temps.save_settings(c, body)
+            temps.save_settings(c, body, lang)
             return 200, {"ok": True}
         if what == "sensor":
             eid = body.get("entity_id")
             if not isinstance(eid, str) or not eid:
-                return 400, {"error": "Chýba čidlo."}
+                return 400, {"error": tr("srv.app.chyba_cidlo", lang)}
             kw = {k: body[k] for k in ("alias", "group_id", "enabled", "kind", "note", "alert_min", "alert_max") if k in body}
-            temps.update_sensor(c, eid, **kw)
+            temps.update_sensor(c, eid, lang=lang, **kw)
             return 200, {"ok": True}
     except ValueError as e:
         return 400, {"error": str(e)}
@@ -959,26 +977,26 @@ def targets_get(cfg):
     return {"rooms": [{"key": k, "name": ROOM_NAMES[k], "min": t[k]["min"]} for k in TARGET_ROOMS]}
 
 
-def targets_set(cfg, body):
+def targets_set(cfg, body, lang="sk"):
     inp = body.get("targets")
     if not isinstance(inp, dict) or not inp:
-        return 400, {"error": "Chýba zoznam želaných teplôt."}
+        return 400, {"error": tr("srv.app.zoznam_teplot", lang)}
     c = adb(cfg)
     try:
         cur = get_targets(c)
         for k, v in inp.items():
             if k not in TARGET_ROOMS:
-                return 400, {"error": "Neznáma izba: %s." % k}
+                return 400, {"error": tr("srv.app.neznama_izba", lang, k=k)}
             try:
                 x = float((v or {}).get("min") if isinstance(v, dict) else v)
             except (TypeError, ValueError):
-                return 400, {"error": "Neplatná teplota pre izbu %s." % ROOM_NAMES[k]}
+                return 400, {"error": tr("srv.app.neplatna_teplota", lang, room=ROOM_NAMES[k])}
             if not (15 <= x <= 26) or abs(x * 2 - round(x * 2)) > 1e-9:
-                return 400, {"error": "Teplota pre izbu %s musí byť 15 až 26 °C v kroku 0,5." % ROOM_NAMES[k]}
+                return 400, {"error": tr("srv.app.teplota_rozsah", lang, room=ROOM_NAMES[k])}
             cur[k]["min"] = x
         set_state(c, "targets", json.dumps(cur))
         c.execute("INSERT INTO runs(ts,mode,status,stav,summary,actions) VALUES(?,?,?,?,?,?)",
-                  (int(time.time()), get_state(c, "mode", "advise"), "info", None, "Želané teploty izieb zmenené cez web.", "[]"))
+                  (int(time.time()), get_state(c, "mode", "advise"), "info", None, tr("srv.app.teploty_log", i18n.home_lang(cfg)), "[]"))
         c.commit()
     finally:
         c.close()
@@ -1003,9 +1021,9 @@ def parse_ts(v):
     raise ValueError("neplatný čas")
 
 
-def test_key(cfg):
+def test_key(cfg, lang="sk"):
     if not cfg["OPENROUTER_API_KEY"]:
-        return {"ok": False, "error": "Kľúč nie je nastavený."}
+        return {"ok": False, "error": tr("srv.app.kluc_nenastaveny", lang)}
     try:
         txt, tin, tout, cost = call_llm(cfg, "Odpovedz presne týmto JSON: {\"ok\": true}", "test", 2500)
         return {"ok": True, "model": cfg["OPENROUTER_MODEL"], "tokens": (tin or 0) + (tout or 0), "cost": cost, "reply": txt[:80]}
@@ -1136,7 +1154,7 @@ def shift_days(s, n):
     return (datetime.date.fromisoformat(s) + datetime.timedelta(days=n)).isoformat()
 
 
-def stats_date(v, name):
+def stats_date(v, name, lang="sk"):
     """Dátum RRRR-MM-DD (lokálny deň). Neplatný = ValueError po slovensky."""
     s = str(v or "").strip()
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
@@ -1144,41 +1162,41 @@ def stats_date(v, name):
             return datetime.date.fromisoformat(s).isoformat()
         except ValueError:
             pass
-    raise ValueError("Neplatný dátum v parametri %s (očakávam RRRR-MM-DD)." % name)
+    raise ValueError(tr("srv.app.stats_datum", lang, name=name))
 
 
-def stats_qdate(p, name, default):
+def stats_qdate(p, name, default, lang="sk"):
     v = p.get(name, [""])[0]
-    return stats_date(v, name) if v else default
+    return stats_date(v, name, lang) if v else default
 
 
-def stats_period(p):
+def stats_period(p, lang="sk"):
     """Parametre from / to (predvolene posledných 30 dní do dnes). Obdobie musí byť v poriadku."""
-    to = stats_qdate(p, "to", today_s())
-    frm = stats_qdate(p, "from", shift_days(to, -30))
+    to = stats_qdate(p, "to", today_s(), lang)
+    frm = stats_qdate(p, "from", shift_days(to, -30), lang)
     if frm > to:
-        raise ValueError("Dátum od nesmie byť neskôr ako dátum do.")
+        raise ValueError(tr("srv.app.stats_od_do", lang))
     if (datetime.date.fromisoformat(to) - datetime.date.fromisoformat(frm)).days > STATS_MAX_SPAN:
-        raise ValueError("Obdobie je príliš dlhé (najviac 10 rokov).")
+        raise ValueError(tr("srv.app.stats_dlhe", lang))
     return frm, to
 
 
-def stats_range_args(p):
-    frm, to = stats_period(p)
+def stats_range_args(p, lang="sk"):
+    frm, to = stats_period(p, lang)
     g = p.get("group", [""])[0] or "day"
     if g not in STATS_GROUPS:
-        raise ValueError("Neplatná skupina (day, week alebo month).")
+        raise ValueError(tr("srv.app.stats_skupina", lang))
     return frm, to, g
 
 
-def stats_compare_dates(p):
+def stats_compare_dates(p, lang="sk"):
     parts = [x.strip() for x in p.get("dates", [""])[0].split(",") if x.strip()]
     if not 1 <= len(parts) <= 6:
-        raise ValueError("Porovnanie vyžaduje 1 až 6 dátumov.")
-    return [stats_date(x, "dates") for x in parts]
+        raise ValueError(tr("srv.app.stats_porovnanie", lang))
+    return [stats_date(x, "dates", lang) for x in parts]
 
 
-def stats_ts(v):
+def stats_ts(v, lang="sk"):
     """Čas poruchy: unix sekundy (číslo alebo reťazec cifier) alebo RRRR-MM-DD HH:MM (miestny čas). None = neuvedené."""
     if v is None or v == "":
         return None
@@ -1186,9 +1204,9 @@ def stats_ts(v):
         try:
             ts = int(float(v))
         except (ValueError, OverflowError):
-            raise ValueError("Neplatný čas poruchy.")
+            raise ValueError(tr("srv.app.stats_cas_poruchy", lang))
         if not 946684800 <= ts <= 4102444800:
-            raise ValueError("Čas poruchy je mimo rozsahu (rok 2000 až 2100).")
+            raise ValueError(tr("srv.app.stats_cas_rozsah", lang))
         return ts
     m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})", str(v).strip()) if isinstance(v, str) else None
     if m:
@@ -1196,21 +1214,21 @@ def stats_ts(v):
             return int(time.mktime(time.strptime("%s %s:%s" % m.groups(), "%Y-%m-%d %H:%M")))
         except ValueError:
             pass
-    raise ValueError("Neplatný čas poruchy (očakávam unix sekundy alebo RRRR-MM-DD HH:MM).")
+    raise ValueError(tr("srv.app.stats_cas_format", lang))
 
 
-def stats_text(body, key, maxlen):
+def stats_text(body, key, maxlen, lang="sk"):
     v = body.get(key)
     if v is None:
         return ""
     if not isinstance(v, str) or len(v) > maxlen:
-        raise ValueError("Neplatný text v poli %s (najviac %d znakov)." % (key, maxlen))
+        raise ValueError(tr("srv.app.stats_text", lang, key=key, max=maxlen))
     return v.strip()
 
 
-def stats_code(v):
+def stats_code(v, lang="sk"):
     if not isinstance(v, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,30}", v.strip()):
-        raise ValueError("Neplatný kód poruchy (len písmená, čísla a _, najviac 30 znakov).")
+        raise ValueError(tr("srv.app.stats_kod", lang))
     return v.strip().upper()
 
 
@@ -1288,37 +1306,37 @@ def profil_info(cfg):
     return out
 
 
-def profil_get():
+def profil_get(lang="sk"):
     """GET /api/profil (admin)."""
-    return {"profil": profil.load(), "chyby": profil.errors(), "ulozeny": os.path.exists(profil.PROFILE_FILE), "modely": profil.list_models(),
+    return {"profil": profil.load(), "chyby": profil.errors(lang=lang), "ulozeny": os.path.exists(profil.PROFILE_FILE), "modely": profil.list_models(),
             "typy_kurenia": list(profil.TYPY_KURENIA), "typy_jednotky": list(profil.TYPY_JEDNOTKY),
             "abs_limity": dict({k: list(v) for k, v in profil.ABS_LIMITS.items()}, ciel_izby=list(profil.ABS_ROOM_TARGET)),
             "predvolby": {t: {k: list(v) for k, v in d.items()} for t, d in profil.PRESETS.items()},
             "kluce_zariadenia": list(profil.DEVICE_KEYS), "kluce_nastaveni": list(profil.SETTING_KEYS)}
 
 
-def profil_post(body):
+def profil_post(body, lang="sk"):
     """POST /api/profil {profil}: overí a uloží. Chyby -> 400 {chyby:[…]}."""
     p = body.get("profil")
     if not isinstance(p, dict):
-        return 400, {"error": "Chýba profil.", "chyby": ["Telo požiadavky musí obsahovať objekt „profil“."]}
+        return 400, {"error": tr("srv.app.profil_chyba", lang), "chyby": [tr("srv.app.profil_telo", lang)]}
     try:
-        errs = profil.save(p)
+        errs = profil.save(p, lang=lang)
     except OSError as e:
-        return 500, {"error": "Profil sa nepodarilo zapísať: %s" % e, "chyby": []}
+        return 500, {"error": tr("srv.app.profil_zapis", lang, err=e), "chyby": []}
     if errs:
-        return 400, {"error": "Profil obsahuje chyby (%d)." % len(errs), "chyby": errs}
+        return 400, {"error": tr("srv.app.profil_chyby", lang, n=len(errs)), "chyby": errs}
     return 200, {"ok": True, "restart_potrebny": True}
 
 
-def profil_default():
+def profil_default(lang="sk"):
     """POST /api/profil/predvoleny: zmaže profil.json (návrat na pôvodnú inštaláciu)."""
     try:
         if os.path.exists(profil.PROFILE_FILE):
             os.remove(profil.PROFILE_FILE)
         profil._cache.pop(profil.PROFILE_FILE, None)
     except OSError as e:
-        return 500, {"error": "Profil sa nepodarilo zmazať: %s" % e}
+        return 500, {"error": tr("srv.app.profil_zmazanie", lang, err=e)}
     return 200, {"ok": True, "restart_potrebny": True}
 
 
@@ -1437,8 +1455,9 @@ HA_TEMP_TEMPLATE = ("{% set ns = namespace(o=[]) %}{% for s in states.sensor if 
                     "{% set ns.o = ns.o + [{'entity_id': s.entity_id, 'meno': s.name, 'stav': s.state}] %}{% endfor %}{{ ns.o | tojson }}")
 
 
-def _ha_temp_sensors(cfg):
+def _ha_temp_sensors(cfg, lang="sk"):
     url, token = contacts.ha_conf(cfg)
+    ha_auth.check(url, token, lang=lang)
     req = urllib.request.Request(url + "/api/template", data=json.dumps({"template": HA_TEMP_TEMPLATE}).encode("utf-8"), method="POST",
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=10) as r:
@@ -1446,15 +1465,15 @@ def _ha_temp_sensors(cfg):
     return data if isinstance(data, list) else []
 
 
-def profil_ha_entity(cfg):
+def profil_ha_entity(cfg, lang="sk"):
     """Teplotné senzory z HA pre výber izieb; bez HA_TOKEN prázdny zoznam s dôvodom."""
     url, token = contacts.ha_conf(cfg)
     if not token or not url:
-        return {"ok": False, "entity": [], "dovod": "Home Assistant nie je nastavený (chýba adresa alebo token)."}
+        return {"ok": False, "entity": [], "dovod": tr("srv.app.ha_nenastaveny", lang)}
     try:
-        rows = _ha_temp_sensors(cfg)
+        rows = _ha_temp_sensors(cfg, lang)
     except Exception as e:
-        return {"ok": False, "entity": [], "dovod": "Home Assistant neodpovedá: %s" % type(e).__name__}
+        return {"ok": False, "entity": [], "dovod": tr("srv.app.ha_neodpoveda", lang, err=type(e).__name__)}
     out = [{"entity_id": r["entity_id"], "meno": str(r.get("meno") or r["entity_id"]), "stav": r.get("stav")}
            for r in rows if isinstance(r, dict) and isinstance(r.get("entity_id"), str) and r["entity_id"].startswith("sensor.")]
     out.sort(key=lambda r: r["meno"].lower())
@@ -1471,12 +1490,12 @@ def _restart_worker():
     _systemctl("restart", "kurenie-web")
 
 
-def restart_services(cfg):
+def restart_services(cfg, lang="sk"):
     """POST /api/restart: asynchrónny reštart agenta a zberača, potom webu (sám seba). V DRY_RUN alebo bez systemctl len vráti dôvod."""
     if is_dry(cfg):
-        return {"ok": False, "dovod": "Testovacie prostredie (DRY_RUN): služby sa nereštartujú."}
+        return {"ok": False, "dovod": tr("srv.app.dry_restart", lang)}
     if not shutil.which("systemctl"):
-        return {"ok": False, "dovod": "systemctl nie je dostupný (aplikácia nebeží ako systemd služba). Reštartuj služby ručne."}
+        return {"ok": False, "dovod": tr("srv.app.systemctl", lang)}
     threading.Thread(target=_restart_worker, name="restart-sluzieb", daemon=True).start()
     return {"ok": True}
 
@@ -1537,6 +1556,13 @@ class H(BaseHTTPRequestHandler):
         finally:
             c.close()
 
+    def ha_api_ok(self, cfg):
+        c = adb(cfg)
+        try:
+            return ha_api.check(c, self.headers.get("Authorization"))
+        finally:
+            c.close()
+
     def identity(self, cfg):
         """(role, email) alebo None – iba z platnej relácie (cookie). Relácia s e-mailom (Cloudflare Access) platí len kým je e-mail
         v tabuľke `users` a rola správcu len kým ju tabuľka potvrdzuje. Hlavička Cf-Access-Authenticated-User-Email sa nepoužíva."""
@@ -1563,6 +1589,7 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         p = parse_qs(u.query)
         cfg = load_cfg()
+        lang = i18n.req_lang(self.headers)
         try:
             if u.path in ("/", "/index.html"):
                 with open(os.path.join(ROOT, "ui.html"), "rb") as f:
@@ -1589,56 +1616,61 @@ class H(BaseHTTPRequestHandler):
                 return self.static_sw()
             if not u.path.startswith("/api/"):
                 return self.send(404, {"error": "not found"})
+            if u.path == ha_api.PATH_STATE:   # integrácia Home Assistant: vlastný kľúč (Authorization: Bearer)
+                if not self.ha_api_ok(cfg):
+                    return self.send(401, {"error": "unauthorized"})
+                st = status(cfg, "admin", None, i18n.home_lang(cfg))
+                return self.send(200, ha_api.build_state(st, int(time.time()), names=profil.load()["esp"]["entity"]))
             ident = self.identity(cfg)
             if not ident:
                 return self.send(401, {"error": "auth"})
             role, email = ident
             if role != "admin" and u.path not in USER_GET:   # centrálna kontrola oprávnení pre rolu `user`
-                return self.send(403, NO_PERM)
+                return self.send(403, {"error": tr("srv.app.no_perm", lang)})
             if u.path == "/api/status":
-                return self.send(200, status(cfg, role, email))
+                return self.send(200, status(cfg, role, email, lang))
             if u.path == "/api/profil":
-                return self.send(200, profil_get())
+                return self.send(200, profil_get(lang))
             if u.path == "/api/profil/esp_entity":
                 return self.send(200, profil_esp_entity(cfg))
             if u.path == "/api/profil/ha_entity":
-                return self.send(200, profil_ha_entity(cfg))
+                return self.send(200, profil_ha_entity(cfg, lang))
             if u.path == "/api/push/key":
                 try:
                     return self.send(200, {"key": notify.vapid_keys()[1]})
                 except Exception as e:
                     print("push: kľúč nie je dostupný (%s)" % type(e).__name__, file=sys.stderr, flush=True)
-                    return self.send(503, {"error": "Upozornenia na zariadenia nie sú na serveri dostupné."})
+                    return self.send(503, {"error": tr("srv.app.push_nedostupne", lang)})
             if u.path == "/api/series":
-                code, out = series_get(cfg, p)
+                code, out = series_get(cfg, p, lang)
                 return self.send(code, out)
             if u.path == "/api/spotreba":   # denná spotreba domu a odhad ceny (spotreba.py); neplatný vstup = 400 s textom
                 try:
-                    return self.send(200, spotreba.report(cfg, p.get("od", [""])[0] or None, p.get("do", [""])[0] or None))
+                    return self.send(200, spotreba.report(cfg, p.get("od", [""])[0] or None, p.get("do", [""])[0] or None, lang=lang))
                 except ValueError as e:
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/vonku":   # teploty podľa vonkajšej teploty (vonku.py); neplatný vstup = 400 s textom
                 try:
                     return self.send(200, vonku.report(cfg, p.get("od", [""])[0] or None, p.get("do", [""])[0] or None,
-                                                       p.get("krok", ["2"])[0] or 2))
+                                                       p.get("krok", ["2"])[0] or 2, lang=lang))
                 except ValueError as e:
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/akokuri":   # teplota vody podľa vonkajšej teploty z minútových vzoriek (vonku.kurenie); neplatný vstup = 400
                 try:
                     return self.send(200, vonku.kurenie(cfg, p.get("od", [""])[0] or None, p.get("do", [""])[0] or None,
-                                                        p.get("krok", ["1"])[0] or 1))
+                                                        p.get("krok", ["1"])[0] or 1, lang=lang))
                 except ValueError as e:
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/push/status":
                 c = adb(cfg)
                 try:
-                    return self.send(200, notify.push_status(cfg, c, role, email))
+                    return self.send(200, notify.push_status(cfg, c, role, email, lang))
                 finally:
                     c.close()
             if u.path == "/api/users":
                 c = adb(cfg)
                 try:
-                    return self.send(200, users_get(cfg, c))
+                    return self.send(200, users_get(cfg, c, lang))
                 finally:
                     c.close()
             if u.path == "/api/day":
@@ -1662,19 +1694,19 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/contacts":
                 c = adb(cfg)
                 try:
-                    return self.send(200, contacts_get(cfg, c))
+                    return self.send(200, contacts_get(cfg, c, lang))
                 finally:
                     c.close()
             if u.path == "/api/temps":
                 c = adb(cfg)
                 try:
-                    return self.send(200, temps_get(cfg, c))
+                    return self.send(200, temps_get(cfg, c, lang))
                 finally:
                     c.close()
             if u.path == "/api/abtest":
                 c = adb(cfg)
                 try:
-                    return self.send(200, abtest.api_state(cfg, c))
+                    return self.send(200, abtest.api_state(cfg, c, lang=lang))
                 finally:
                     c.close()
             if u.path == "/api/interventions":
@@ -1707,14 +1739,19 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         cfg = load_cfg()
+        lang = i18n.req_lang(self.headers)
         try:
             n = int(self.headers.get("Content-Length") or 0)
             try:
                 body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
             except ValueError:
-                return self.send(400, {"error": "Neplatné telo požiadavky."})
+                return self.send(400, {"error": tr("srv.app.neplatne_telo", lang)})
             if not isinstance(body, dict):
-                return self.send(400, {"error": "Neplatné telo požiadavky."})
+                return self.send(400, {"error": tr("srv.app.neplatne_telo", lang)})
+            if u.path in ha_api.ACTIONS:   # integrácia Home Assistant: vlastný kľúč namiesto cookie / X-Kurenie
+                if not self.ha_api_ok(cfg):
+                    return self.send(401, {"error": "unauthorized"})
+                return self.send(*ha_api.dispatch(cfg, u.path, body, sys.modules[__name__]))
             # jednoduchá ochrana pred cudzou stránkou: požiadavka musí prísť z tejto stránky
             if self.headers.get("X-Kurenie") != "1":
                 return self.send(403, {"error": "forbidden"})
@@ -1734,7 +1771,16 @@ class H(BaseHTTPRequestHandler):
                 return self.send(401, {"error": "auth"})
             role, email = ident
             if role != "admin" and u.path not in USER_POST:   # centrálna kontrola oprávnení pre rolu `user`
-                return self.send(403, NO_PERM)
+                return self.send(403, {"error": tr("srv.app.no_perm", lang)})
+            if u.path in ("/api/ha_key", "/api/ha_key_revoke"):   # kľúč integrácie Home Assistant (len správca)
+                c = adb(cfg)
+                try:
+                    if u.path == "/api/ha_key":
+                        return self.send(200, {"ok": True, "key": ha_api.new_key(c), "info": ha_api.key_info(c)})
+                    ha_api.revoke(c)
+                    return self.send(200, {"ok": True, "info": ha_api.key_info(c)})
+                finally:
+                    c.close()
             if u.path == "/api/logout":
                 c = adb(cfg)
                 try:
@@ -1748,13 +1794,13 @@ class H(BaseHTTPRequestHandler):
                 try:
                     what = u.path[len("/api/push/"):]
                     if what == "subscribe":
-                        code, out = notify.push_subscribe(cfg, c, email, role, body.get("subscription"), body.get("ua"))
+                        code, out = notify.push_subscribe(cfg, c, email, role, body.get("subscription"), body.get("ua"), lang)
                     elif what == "unsubscribe":
-                        code, out = notify.push_unsubscribe(c, email, body.get("endpoint"))
+                        code, out = notify.push_unsubscribe(c, email, body.get("endpoint"), lang)
                     elif what == "test":
-                        code, out = notify.push_test(cfg, c, email)
+                        code, out = notify.push_test(cfg, c, email, lang)
                     elif what == "remove":
-                        code, out = notify.push_remove(c, role, email, body.get("id"))
+                        code, out = notify.push_remove(c, role, email, body.get("id"), lang)
                     else:
                         code, out = 404, {"error": "not found"}
                 finally:
@@ -1765,109 +1811,114 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/stats/"):
                 return self.stats_post(cfg, u.path[len("/api/stats/"):], body)
             if u.path == "/api/settings":
-                code, out = save_settings(cfg, body)
+                code, out = save_settings(cfg, body, lang)
                 return self.send(code, out)
             if u.path == "/api/profil":
-                code, out = profil_post(body)
+                code, out = profil_post(body, lang)
                 return self.send(code, out)
             if u.path == "/api/profil/predvoleny":
-                code, out = profil_default()
+                code, out = profil_default(lang)
                 return self.send(code, out)
             if u.path == "/api/restart":
-                return self.send(200, restart_services(cfg))
+                return self.send(200, restart_services(cfg, lang))
             if u.path == "/api/message":
                 text = str(body.get("text") or "").strip()
                 if not text or len(text) > 2000:
-                    return self.send(400, {"error": "Správa je prázdna alebo dlhšia ako 2000 znakov."})
+                    return self.send(400, {"error": tr("srv.app.sprava_prazdna", lang)})
                 c = adb(cfg)
                 info = {}
                 try:
                     if role != "admin" and c.execute("SELECT count(*) FROM messages WHERE author=? AND ts>?",
                                                      (email, int(time.time()) - 3600)).fetchone()[0] >= 30:
-                        return self.send(429, {"error": "Priveľa správ za poslednú hodinu. Skús to neskôr."})
-                    reply, cost, err = chat_reply(cfg, c, text, info=info, role=role, email=email)
+                        return self.send(429, {"error": tr("srv.app.sprav_limit", lang)})
+                    reply, cost, err = chat_reply(cfg, c, text, info=info, role=role, email=email, lang=lang)
                 finally:
                     c.close()
                 return self.send(200, {"reply": reply, "cost": cost, "error": err, "messages": messages(cfg),
                                        "intervention": info.get("intervention")})
             if u.path == "/api/tunnel_setup":
-                code, out = tunnel_auto(cfg, body)
+                code, out = tunnel_auto(cfg, body, lang)
                 return self.send(code, out)
             if u.path == "/api/access_config":
-                code, out = access_config(cfg, body)
+                code, out = access_config(cfg, body, lang)
                 return self.send(code, out)
             if u.path == "/api/tunnel":
-                code, out = tunnel_save(cfg, body)
+                code, out = tunnel_save(cfg, body, lang)
                 return self.send(code, out)
             if u.path == "/api/tunnel_api":
-                code, out = tunnel_api(cfg, body)
+                code, out = tunnel_api(cfg, body, lang)
                 return self.send(code, out)
             if u.path in ("/api/users", "/api/users/delete"):
                 c = adb(cfg)
                 try:
-                    code, out = users_set(cfg, c, body) if u.path == "/api/users" else users_delete(cfg, c, body)
+                    code, out = users_set(cfg, c, body, lang) if u.path == "/api/users" else users_delete(cfg, c, body, lang)
                 finally:
                     c.close()
                 return self.send(code, out)
             if u.path == "/api/user_target":
-                code, out = user_target_post(cfg, body, email)
+                code, out = user_target_post(cfg, body, email, lang)
                 return self.send(code, out)
             if u.path == "/api/room_target":
-                code, out = room_target_post(cfg, body, email or "správca")
+                code, out = room_target_post(cfg, body, email or "správca", lang)
                 return self.send(code, out)
             if u.path == "/api/tuv_boost":
-                code, out = tuv_boost_post(cfg, body, email or "správca")
+                code, out = tuv_boost_post(cfg, body, email or "správca", lang)
                 return self.send(code, out)
             if u.path == "/api/tuv_target":
-                code, out = tuv_target_post(cfg, body, email or "správca")
+                code, out = tuv_target_post(cfg, body, email or "správca", lang)
                 return self.send(code, out)
             if u.path == "/api/test_key":
-                return self.send(200, test_key(cfg))
+                return self.send(200, test_key(cfg, lang))
             if u.path == "/api/ha_test":
-                return self.send(200, contacts.test(cfg))
+                tu, tt = str(body.get("ha_url") or "").strip().rstrip("/"), str(body.get("ha_token") or "").strip()
+                if tu and not re.fullmatch(r"https?://[^\s]{1,300}", tu):
+                    return self.send(400, {"error": tr("srv.app.adresa_ha", lang)})
+                if tt and (len(tt) > 2048 or not re.fullmatch(r"[A-Za-z0-9_\-\.=]+", tt)):
+                    return self.send(400, {"error": tr("srv.app.token_ha", lang)})
+                return self.send(200, contacts.test(cfg, tu or None, tt or None, lang))
             if u.path == "/api/mqtt":
                 c = adb(cfg)
                 try:
-                    code, out = mqtt_post(cfg, c, body)
+                    code, out = mqtt_post(cfg, c, body, lang)
                 finally:
                     c.close()
                 return self.send(code, out)
             if u.path == "/api/mqtt_test":
-                return self.send(200, mqtt_test(cfg, body))
+                return self.send(200, mqtt_test(cfg, body, lang))
             if u.path.startswith("/api/contacts/"):
                 c = adb(cfg)
                 try:
-                    code, out = contacts_post(cfg, c, u.path[len("/api/contacts/"):], body)
+                    code, out = contacts_post(cfg, c, u.path[len("/api/contacts/"):], body, lang)
                 finally:
                     c.close()
                 return self.send(code, out)
             if u.path.startswith("/api/temps/"):
                 c = adb(cfg)
                 try:
-                    code, out = temps_post(cfg, c, u.path[len("/api/temps/"):], body)
+                    code, out = temps_post(cfg, c, u.path[len("/api/temps/"):], body, lang)
                 finally:
                     c.close()
                 return self.send(code, out)
             if u.path == "/api/notify_test":
-                ok, err = notify.send(cfg, "Kúrenie – test", "Testovacie upozornenie z webu agenta kúrenia.", "test", 0)
-                return self.send(200, {"ok": bool(ok), "error": err})
+                ok, err = notify.send(cfg, tr("srv.app.notify_test_titul", lang), tr("srv.app.notify_test_text", lang), "test", 0)
+                return self.send(200, {"ok": bool(ok), "error": notify.err_text(err, lang)})
             if u.path == "/api/targets":
-                code, out = targets_set(cfg, body)
+                code, out = targets_set(cfg, body, lang)
                 return self.send(code, out)
             if u.path == "/api/intervention":
                 text = str(body.get("text") or "").strip()
                 if not text or len(text) > 500:
-                    return self.send(400, {"error": "Popis zásahu je prázdny alebo dlhší ako 500 znakov."})
+                    return self.send(400, {"error": tr("srv.app.zasah_popis", lang)})
                 kind = body.get("kind") or "ine"
                 if kind not in interventions.KINDS:
-                    return self.send(400, {"error": "Neplatný typ zásahu."})
+                    return self.send(400, {"error": tr("srv.app.zasah_typ", lang)})
                 room = body.get("room") or None
                 if room is not None and room not in ROOMS:
-                    return self.send(400, {"error": "Neplatná izba."})
+                    return self.send(400, {"error": tr("srv.app.neplatna_izba", lang)})
                 try:
                     ts = parse_ts(body.get("ts"))
                 except ValueError:
-                    return self.send(400, {"error": "Neplatný čas zásahu."})
+                    return self.send(400, {"error": tr("srv.app.zasah_cas", lang)})
                 c = adb(cfg)
                 try:
                     iid = interventions.add(c, "user_manual", kind, room, text, ts=ts)
@@ -1883,28 +1934,28 @@ class H(BaseHTTPRequestHandler):
                 finally:
                     c.close()
                 if not ok:
-                    return self.send(400, {"error": "Zásah sa nedá zrušiť (neexistuje alebo už nečaká na vyhodnotenie)."})
+                    return self.send(400, {"error": tr("srv.app.zasah_zrusit", lang)})
                 return self.send(200, {"ok": True})
             if u.path == "/api/abtest_start":
                 c = adb(cfg)
                 try:
-                    code, out = abtest.start(cfg, c, body.get("days"))
+                    code, out = abtest.start(cfg, c, body.get("days"), lang=lang)
                 finally:
                     c.close()
                 return self.send(code, out)
             if u.path == "/api/abtest_stop":
                 c = adb(cfg)
                 try:
-                    ok = abtest.stop(cfg, c, "zastavené používateľom")
+                    ok = abtest.stop(cfg, c, tr("srv.app.abtest_stop_dovod", i18n.home_lang(cfg)))
                 finally:
                     c.close()
                 if not ok:
-                    return self.send(400, {"error": "Žiadny test neprebieha."})
+                    return self.send(400, {"error": tr("srv.app.ziadny_test", lang)})
                 return self.send(200, {"ok": True})
             if u.path == "/api/undo":
                 c = adb(cfg)
                 try:
-                    ok, msg = undo(cfg, c, body.get("action_id"))
+                    ok, msg = undo(cfg, c, body.get("action_id"), lang)
                 finally:
                     c.close()
                 return self.send(200 if ok else 400, {"ok": True, "message": msg} if ok else {"error": msg})
@@ -1913,11 +1964,11 @@ class H(BaseHTTPRequestHandler):
                 if u.path == "/api/mode":
                     m = body.get("mode")
                     if m not in MODES:
-                        return self.send(400, {"error": "neplatný režim"})
+                        return self.send(400, {"error": tr("srv.app.neplatny_rezim", lang)})
                     old = get_state(c, "mode", "advise")
                     set_state(c, "mode", m)
                     c.execute("INSERT INTO runs(ts,mode,status,stav,summary,actions) VALUES(?,?,?,?,?,?)",
-                              (int(time.time()), m, "info", None, "Režim agenta zmenený cez web: %s → %s" % (old, m), "[]"))
+                              (int(time.time()), m, "info", None, tr("srv.app.rezim_log", i18n.home_lang(cfg), old=old, new=m), "[]"))
                     c.commit()
                     return self.send(200, {"mode": m})
                 if u.path == "/api/run_now":
@@ -1966,68 +2017,72 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, f.read(), ctype)
 
     def stats_get(self, cfg, what, p):
+        lang = i18n.req_lang(self.headers)
+        if (p.get("lang") or [""])[0] in i18n.known_langs():   # export CSV je odkaz (bez hlavičiek): jazyk ide v parametri `lang`
+            lang = p["lang"][0]
         if stats is None:
-            return self.send(503, {"error": STATS_NA})
+            return self.send(503, {"error": tr("srv.app.stats_na", lang)})
         try:
             if what == "meta":
-                return self.send(200, {"metrics": stats.METRICS, "coverage": stats.coverage(cfg), "hdd_base": hdd_base(cfg),
-                                       "hdd_note": "Stupňo-dni = súčet max(0, základ − vonkajšia teplota) za hodiny s dátami, delený 24."})
+                return self.send(200, {"metrics": stats.metrics(lang), "coverage": stats.coverage(cfg, lang), "hdd_base": hdd_base(cfg),
+                                       "hdd_note": tr("srv.app.stats_hdd_note", lang)})
             if what == "day":
-                return self.send(200, stats.get_day(cfg, stats_qdate(p, "d", today_s())))
+                return self.send(200, stats.get_day(cfg, stats_qdate(p, "d", today_s(), lang), lang))
             if what == "range":
-                frm, to, g = stats_range_args(p)
-                return self.send(200, stats.get_range(cfg, frm, to, g))
+                frm, to, g = stats_range_args(p, lang)
+                return self.send(200, stats.get_range(cfg, frm, to, g, lang))
             if what == "compare":
-                return self.send(200, stats.compare(cfg, stats_compare_dates(p)))
+                return self.send(200, stats.compare(cfg, stats_compare_dates(p, lang), lang))
             if what == "quick":
-                return self.send(200, {"items": stats.quick_dates(cfg, stats_qdate(p, "base", today_s()))})
+                return self.send(200, {"items": stats.quick_dates(cfg, stats_qdate(p, "base", today_s(), lang), lang)})
             if what == "faults":
-                frm, to = stats_period(p)
+                frm, to = stats_period(p, lang)
                 only = p.get("open", [""])[0] in ("1", "true", "yes")
-                return self.send(200, {"items": stats.faults_list(cfg, frm, to, only_open=only)})
+                return self.send(200, {"items": stats.faults_list(cfg, frm, to, only_open=only, lang=lang)})
             if what == "codes":
-                return self.send(200, {"items": stats.fault_codes_list(cfg)})
+                return self.send(200, {"items": stats.fault_codes_list(cfg, lang)})
             if what == "export":
                 kind = p.get("kind", [""])[0]
                 if kind == "day":
-                    d = stats_qdate(p, "d", today_s())
-                    text, tag = stats.export_csv(cfg, "day", date=d), d
+                    d = stats_qdate(p, "d", today_s(), lang)
+                    text, tag = stats.export_csv(cfg, "day", date=d, lang=lang), d
                 elif kind == "range":
-                    frm, to, g = stats_range_args(p)
-                    text, tag = stats.export_csv(cfg, "range", date_from=frm, date_to=to, group=g), "%s_%s" % (frm, to)
+                    frm, to, g = stats_range_args(p, lang)
+                    text, tag = stats.export_csv(cfg, "range", date_from=frm, date_to=to, group=g, lang=lang), "%s_%s" % (frm, to)
                 elif kind == "compare":
-                    dates = stats_compare_dates(p)
-                    text, tag = stats.export_csv(cfg, "compare", dates=dates), dates[0]
+                    dates = stats_compare_dates(p, lang)
+                    text, tag = stats.export_csv(cfg, "compare", dates=dates, lang=lang), dates[0]
                 else:
-                    raise ValueError("Neplatný druh exportu (day, range alebo compare).")
+                    raise ValueError(tr("srv.app.stats_export", lang))
                 return self.send_csv(text, "statistiky-%s-%s.csv" % (kind, tag))
         except ValueError as e:
             return self.send(400, {"error": str(e)})
         return self.send(404, {"error": "not found"})
 
     def stats_post(self, cfg, what, body):
+        lang = i18n.req_lang(self.headers)
         if stats is None:
-            return self.send(503, {"error": STATS_NA})
+            return self.send(503, {"error": tr("srv.app.stats_na", lang)})
         try:
             if what == "fault":
-                ts_start = stats_ts(body.get("ts_start"))
+                ts_start = stats_ts(body.get("ts_start"), lang)
                 if ts_start is None:
-                    raise ValueError("Chýba čas začiatku poruchy.")
-                ts_end = stats_ts(body.get("ts_end"))
+                    raise ValueError(tr("srv.app.stats_chyba_zaciatok", lang))
+                ts_end = stats_ts(body.get("ts_end"), lang)
                 if ts_end is not None and ts_end < ts_start:
-                    raise ValueError("Koniec poruchy je skôr ako jej začiatok.")
-                fid = stats.fault_add(cfg, ts_start, ts_end, stats_code(body.get("code")),
-                                      stats_text(body, "title", 200), stats_text(body, "text", 2000))
+                    raise ValueError(tr("srv.app.stats_koniec", lang))
+                fid = stats.fault_add(cfg, ts_start, ts_end, stats_code(body.get("code"), lang),
+                                      stats_text(body, "title", 200, lang), stats_text(body, "text", 2000, lang), lang)
                 return self.send(200, {"ok": True, "id": fid})
             if what == "fault_delete":
                 fid = body.get("id")
                 if isinstance(fid, bool) or not isinstance(fid, int):
-                    raise ValueError("Neplatné id poruchy.")
-                stats.fault_delete(cfg, fid)
+                    raise ValueError(tr("srv.app.stats_id_poruchy", lang))
+                stats.fault_delete(cfg, fid, lang)
                 return self.send(200, {"ok": True})
             if what == "fault_code":
-                stats.fault_code_set(cfg, stats_code(body.get("code")), stats_text(body, "title", 200),
-                                     stats_text(body, "description", 2000), stats_text(body, "fix", 2000))
+                stats.fault_code_set(cfg, stats_code(body.get("code"), lang), stats_text(body, "title", 200, lang),
+                                     stats_text(body, "description", 2000, lang), stats_text(body, "fix", 2000, lang), lang)
                 return self.send(200, {"ok": True})
         except ValueError as e:
             return self.send(400, {"error": str(e)})
@@ -2035,13 +2090,14 @@ class H(BaseHTTPRequestHandler):
 
     # --- prihlásenie
     def do_setup(self, cfg, body):
+        lang = i18n.req_lang(self.headers)
         pw = body.get("password")
         c = adb(cfg)
         try:
             if get_state(c, "auth_hash"):
-                return self.send(400, {"error": "Heslo je už nastavené."})
+                return self.send(400, {"error": tr("srv.app.heslo_nastavene", lang)})
             if not isinstance(pw, str) or len(pw) < 8 or len(pw) > 200:
-                return self.send(400, {"error": "Heslo musí mať aspoň 8 znakov."})
+                return self.send(400, {"error": tr("srv.app.heslo_8", lang)})
             set_state(c, "auth_hash", hash_password(pw))
             tok = create_session(c)
         finally:
@@ -2049,18 +2105,19 @@ class H(BaseHTTPRequestHandler):
         return self.send(200, {"ok": True}, headers=self.set_cookie(tok))
 
     def do_login(self, cfg, body, ip):
+        lang = i18n.req_lang(self.headers)
         wait = rate_blocked(ip)
         if wait:
-            return self.send(429, {"error": "Priveľa pokusov. Skús znova o %d s." % wait})
+            return self.send(429, {"error": tr("srv.app.privela_pokusov", lang, n=wait)})
         pw = body.get("password")
         c = adb(cfg)
         try:
             h = get_state(c, "auth_hash")
             if not h:
-                return self.send(400, {"error": "Heslo ešte nie je nastavené."})
+                return self.send(400, {"error": tr("srv.app.heslo_nenastavene", lang)})
             if not isinstance(pw, str) or not verify_password(pw, h):
                 rate_fail(ip)   # po 5. neúspešnom pokuse sa ďalšie pokusy 60 s odmietajú (429)
-                return self.send(401, {"error": "Nesprávne heslo."})
+                return self.send(401, {"error": tr("srv.app.nespravne_heslo", lang)})
             rate_ok(ip)
             tok = create_session(c)
         finally:
@@ -2069,17 +2126,18 @@ class H(BaseHTTPRequestHandler):
 
     def do_access_login(self, cfg, body, ip):
         """POST /api/access_login {as: user|admin, password?}: relácia až po explicitnej voľbe roly, len s overenou Access identitou."""
+        lang = i18n.req_lang(self.headers)
         ai = self.access_identity(cfg)
         if not ai:
-            return self.send(403, {"error": "Prihlásenie cez Cloudflare nie je dostupné. Prihlás sa heslom."})
+            return self.send(403, {"error": tr("srv.app.cf_login", lang)})
         want = body.get("as")
         if want not in ("user", "admin"):
-            return self.send(400, {"error": "Vyber rolu (Používateľ alebo Správca)."})
+            return self.send(400, {"error": tr("srv.app.vyber_rolu", lang)})
         c = adb(cfg)
         try:
             if want == "admin":
                 if ai["role"] != "admin":
-                    return self.send(403, {"error": "Tento e-mail nemá oprávnenie Správcu."})
+                    return self.send(403, {"error": tr("srv.app.email_nie_spravca", lang)})
                 pass   # správcu už overil Cloudflare Access (e-mail s rolou admin v zozname používateľov); heslo sa nevyžaduje
             tok = create_session(c, want, ai["email"])
         finally:
@@ -2087,17 +2145,18 @@ class H(BaseHTTPRequestHandler):
         return self.send(200, {"ok": True, "role": want, "email": ai["email"]}, headers=self.set_cookie(tok))
 
     def do_password(self, cfg, body, ip):
+        lang = i18n.req_lang(self.headers)
         wait = rate_blocked(ip)
         if wait:
-            return self.send(429, {"error": "Priveľa pokusov. Skús znova o %d s." % wait})
+            return self.send(429, {"error": tr("srv.app.privela_pokusov", lang, n=wait)})
         old, new = body.get("old"), body.get("new")
         c = adb(cfg)
         try:
             if not isinstance(old, str) or not verify_password(old, get_state(c, "auth_hash", "") or ""):
                 rate_fail(ip)
-                return self.send(400, {"error": "Súčasné heslo nie je správne."})
+                return self.send(400, {"error": tr("srv.app.sucasne_heslo", lang)})
             if not isinstance(new, str) or len(new) < 8 or len(new) > 200:
-                return self.send(400, {"error": "Nové heslo musí mať aspoň 8 znakov."})
+                return self.send(400, {"error": tr("srv.app.nove_heslo_8", lang)})
             set_state(c, "auth_hash", hash_password(new))
             c.execute("DELETE FROM sessions WHERE token_hash!=?", (tok_hash(self.token()),))   # ostatné session sa zrušia
             c.commit()

@@ -7,9 +7,12 @@ Slučka `temps_loop` beží ako daemon vlákno v procese agenta (každých 60 s)
 na `contacts` (rovnaký HA aj token) – tu sa nevytvára druhý; chyba tohto čítania sa ukazuje len na webe. Iba štandardná knižnica.
 """
 import json, math, time, traceback, urllib.error, urllib.request
+import ha_auth
 from common import get_state, load_cfg, adb, set_state, day_bounds
 import contacts
 import notify
+import i18n
+from i18n import tr
 from contacts import norm, sk, ha_conf, parse_since
 
 TEMPLATE = (
@@ -87,33 +90,37 @@ def to_celsius(state, unit):
     return round(v, 2)
 
 
-def fetch(cfg, timeout=10):
+def fetch(cfg, timeout=10, force=False, lang=None):
     """Zoznam teplotných čidiel z HA: [{"id","name","state","unit","since","area"}]. Pri chybe RuntimeError so slovenským textom
     (token sa v texte nikdy nevyskytuje)."""
+    lang = lang or i18n.home_lang(cfg)
     url, token = ha_conf(cfg)
     if not url or not token:
-        raise RuntimeError("Home Assistant nie je nastavený (chýba adresa alebo token).")
+        raise RuntimeError(tr("srv.contacts.ha_nenastaveny", lang))
+    ha_auth.check(url, token, force, lang)
     req = urllib.request.Request(url + "/api/template", data=json.dumps({"template": TEMPLATE}).encode("utf-8"), method="POST",
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read(4_000_000).decode("utf-8", "replace")
+        ha_auth.ok(url, token)
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            raise RuntimeError("Home Assistant odmietol token (HTTP %d). Skontroluj dlhodobý prístupový token." % e.code)
+            ha_auth.failed(url, token)
+            raise RuntimeError(ha_auth.message(e.code, lang))
         if e.code == 404:
-            raise RuntimeError("Na tejto adrese nie je API Home Assistanta (HTTP 404). Skontroluj adresu.")
-        raise RuntimeError("Home Assistant odpovedal chybou HTTP %d." % e.code)
+            raise RuntimeError(tr("srv.contacts.ha_404", lang))
+        raise RuntimeError(tr("srv.contacts.ha_http", lang, code=e.code))
     except urllib.error.URLError as e:
-        raise RuntimeError("Spojenie s Home Assistantom zlyhalo: %s" % str(getattr(e, "reason", e))[:150])
+        raise RuntimeError(tr("srv.contacts.ha_spojenie", lang, err=str(getattr(e, "reason", e))[:150]))
     except Exception as e:
-        raise RuntimeError("Spojenie s Home Assistantom zlyhalo: %s" % (type(e).__name__ + " " + str(e))[:150])
+        raise RuntimeError(tr("srv.contacts.ha_spojenie", lang, err=(type(e).__name__ + " " + str(e))[:150]))
     try:
         data = json.loads(raw.strip())
     except ValueError:
-        raise RuntimeError("Home Assistant nevrátil platný JSON (šablóna teplôt sa nevyhodnotila).")
+        raise RuntimeError(tr("srv.temps.ha_json", lang))
     if not isinstance(data, list):
-        raise RuntimeError("Home Assistant vrátil neočakávaný tvar odpovede.")
+        raise RuntimeError(tr("srv.contacts.ha_tvar", lang))
     return [d for d in data if isinstance(d, dict) and isinstance(d.get("id"), str) and d["id"].startswith("sensor.")]
 
 
@@ -226,10 +233,10 @@ def poll(cfg, c, now=None):
         return {"ok": False, "count": 0, "error": err}
 
 
-def status(cfg, c, now=None):
+def status(cfg, c, now=None, lang="sk"):
     """Stav spojenia pre panel čidiel: ako contacts.ha_status, ale počet a chyba sa týkajú teplotného čítania."""
     now = int(now or time.time())
-    h = dict(contacts.ha_status(cfg, c))
+    h = dict(contacts.ha_status(cfg, c, lang))
     if not h["configured"]:
         return h
     try:
@@ -246,11 +253,11 @@ def status(cfg, c, now=None):
         h["count"] = None
     h["last_ok"] = last
     if fails:
-        h["ok"], h["error"] = False, get_state(c, "temp_ha_error", "") or "Teploty z Home Assistanta sa nepodarilo prečítať."
+        h["ok"], h["error"] = False, get_state(c, "temp_ha_error", "") or tr("srv.temps.nepodarilo_precitat", lang)
     elif not last:
-        h["ok"], h["error"] = False, "Čakám na prvé čítanie teplôt z Home Assistanta."
+        h["ok"], h["error"] = False, tr("srv.temps.cakam", lang)
     elif now - last >= 180:
-        h["ok"], h["error"] = False, "Teploty z Home Assistanta sú staré (agent ich dlhšie nečítal)."
+        h["ok"], h["error"] = False, tr("srv.temps.stare", lang)
     return h
 
 
@@ -314,9 +321,9 @@ def tree(c, now=None):
     return [byg[g["id"]] for g in gs]
 
 
-def api_state(cfg, c, now=None):
+def api_state(cfg, c, now=None, lang="sk"):
     now = int(now or time.time())
-    return {"notify_min": notify_min(c), "ha": status(cfg, c, now), "kinds": [{"key": k, "name": n} for k, n in KINDS],
+    return {"notify_min": notify_min(c), "ha": status(cfg, c, now, lang), "kinds": [{"key": k, "name": n if lang == "sk" else tr("srv.temps.kind_" + k, lang)} for k, n in KINDS],
             "groups": tree(c, now), "other_group_id": contacts.other_id(c)}
 
 
@@ -326,92 +333,92 @@ def move_group(c, from_gid, to_gid):
     c.commit()
 
 
-def _threshold(v, what):
+def _threshold(v, what, lang="sk"):
     """None / "" = bez hranice; inak číslo v rozsahu −40…120."""
     if v is None or (isinstance(v, str) and not v.strip()):
         return None
     if isinstance(v, bool) or not isinstance(v, (int, float, str)):
-        raise ValueError("%s musí byť číslo." % what)
+        raise ValueError(tr("srv.temps.cislo", lang, what=what))
     try:
         x = float(v.strip().replace(",", ".")) if isinstance(v, str) else float(v)
     except ValueError:
-        raise ValueError("%s musí byť číslo." % what)
+        raise ValueError(tr("srv.temps.cislo", lang, what=what))
     if not math.isfinite(x):
-        raise ValueError("%s musí byť číslo." % what)
+        raise ValueError(tr("srv.temps.cislo", lang, what=what))
     if not AMIN <= x <= AMAX:
-        raise ValueError("%s musí byť od %d do %d °C." % (what, AMIN, AMAX))
+        raise ValueError(tr("srv.temps.rozsah", lang, what=what, lo=AMIN, hi=AMAX))
     return round(x, 2)
 
 
 def update_sensor(c, entity_id, alias=_UNSET, group_id=_UNSET, enabled=_UNSET, kind=_UNSET, note=_UNSET,
-                  alert_min=_UNSET, alert_max=_UNSET):
+                  alert_min=_UNSET, alert_max=_UNSET, lang="sk"):
     """Úprava čidla. Neplatný vstup = ValueError so slovenským textom."""
     contacts.ensure(c)
     cur = c.execute("SELECT alert_min, alert_max FROM temp_sensors WHERE entity_id=?", (entity_id,)).fetchone()
     if not cur:
-        raise ValueError("Neznáme čidlo.")
+        raise ValueError(tr("srv.temps.neznane_cidlo", lang))
     sets, args = [], []
     if alias is not _UNSET:
         if alias is not None and not isinstance(alias, str):
-            raise ValueError("Meno musí byť text.")
+            raise ValueError(tr("srv.temps.meno_text", lang))
         a = (alias or "").strip()
         if len(a) > 60:
-            raise ValueError("Meno môže mať najviac 60 znakov.")
+            raise ValueError(tr("srv.temps.meno_60", lang))
         sets.append("alias=?"); args.append(a or None)
     if group_id is not _UNSET:
         if group_id is None:
             group_id = contacts.other_id(c)
         if isinstance(group_id, bool) or not isinstance(group_id, int) or not contacts.group_by_id(c, group_id):
-            raise ValueError("Neplatná skupina.")
+            raise ValueError(tr("srv.temps.neplatna_skupina", lang))
         sets.append("group_id=?"); args.append(group_id)
     if enabled is not _UNSET:
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
         elif not isinstance(enabled, (bool, int)):
-            raise ValueError("Neplatná hodnota zapnutia.")
+            raise ValueError(tr("srv.temps.neplatne_zapnutie", lang))
         sets.append("enabled=?"); args.append(1 if enabled else 0)
     if kind is not _UNSET:
         if kind not in KIND_KEYS:
-            raise ValueError("Neplatný druh čidla.")
+            raise ValueError(tr("srv.temps.neplatny_druh", lang))
         sets.append("kind=?"); args.append(kind)
     if note is not _UNSET:
         if note is not None and not isinstance(note, str):
-            raise ValueError("Poznámka musí byť text.")
+            raise ValueError(tr("srv.temps.poznamka_text", lang))
         n = (note or "").strip()
         if len(n) > 200:
-            raise ValueError("Poznámka môže mať najviac 200 znakov.")
+            raise ValueError(tr("srv.temps.poznamka_200", lang))
         sets.append("note=?"); args.append(n or None)
     lo, hi = cur
     if alert_min is not _UNSET:
-        lo = _threshold(alert_min, "Dolná hranica")
+        lo = _threshold(alert_min, tr("srv.temps.dolna", lang), lang)
         sets.append("alert_min=?"); args.append(lo)
     if alert_max is not _UNSET:
-        hi = _threshold(alert_max, "Horná hranica")
+        hi = _threshold(alert_max, tr("srv.temps.horna", lang), lang)
         sets.append("alert_max=?"); args.append(hi)
     if lo is not None and hi is not None and lo >= hi:
-        raise ValueError("Dolná hranica musí byť menšia ako horná.")
+        raise ValueError(tr("srv.temps.dolna_horna", lang))
     if not sets:
-        raise ValueError("Nič na uloženie.")
+        raise ValueError(tr("srv.temps.nic_na_ulozenie", lang))
     c.execute("UPDATE temp_sensors SET %s WHERE entity_id=?" % ", ".join(sets), (*args, entity_id))
     c.commit()
 
 
-def save_settings(c, body):
+def save_settings(c, body, lang="sk"):
     """Čas upozornenia (min). Vracia text zmeny; neplatný vstup = ValueError."""
     v = body.get("notify_min")
     if v is None:
-        raise ValueError("Nič na uloženie.")
+        raise ValueError(tr("srv.temps.nic_na_ulozenie", lang))
     if isinstance(v, bool) or (isinstance(v, float) and v != int(v)):
-        raise ValueError("Čas upozornenia musí byť celé číslo minút.")
+        raise ValueError(tr("srv.temps.cas_cele", lang))
     try:
         n = int(str(v).strip()) if isinstance(v, str) else int(v)
     except (TypeError, ValueError):
-        raise ValueError("Čas upozornenia musí byť celé číslo minút.")
+        raise ValueError(tr("srv.temps.cas_cele", lang))
     if not 1 <= n <= 240:
-        raise ValueError("Čas upozornenia musí byť od 1 do 240 minút.")
+        raise ValueError(tr("srv.temps.cas_rozsah", lang))
     contacts.ensure(c)
     set_state(c, "temp_notify_min", n)
-    return "čas upozornenia na teplotu %d min" % n
+    return tr("srv.temps.log_cas", lang, n=n)
 
 
 # ---------------------------------------------------------------- vstup pre agenta a denné štatistiky
@@ -534,6 +541,7 @@ def check_notifications(cfg, c, now=None):
         last = 0
     if not last or now - last > STALE_POLL_S:
         return 0                                     # bez čerstvých dát sa nič nevyhodnocuje
+    hl = i18n.home_lang(cfg)
     mem = _load_mem(c)
     thr = notify_min(c)
     gname = {g["id"]: g["name"] for g in contacts.groups(c)}
@@ -560,7 +568,7 @@ def check_notifications(cfg, c, now=None):
         if d is None:
             if m:
                 if m.get("sent"):
-                    _send(cfg, "Kúrenie: teplota v norme", "Teplota v norme: %s – %s má %s °C." % (gn, lab, sk(val)))
+                    _send(cfg, tr("srv.temps.v_norme_t", hl), tr("srv.temps.v_norme", hl, g=gn, lab=lab, v=i18n.dec(sk(val), hl)))
                     sent += 1
                 del mem[eid]
                 changed = True
@@ -573,8 +581,7 @@ def check_notifications(cfg, c, now=None):
             continue
         limit = lo if d == "low" else hi
         if not m["sent"] or (not m.get("ok") and now - m["sent"] >= RETRY_FAILED_S) or (m.get("ok") and now - m["sent"] >= REPEAT_S):
-            ttl, word = ("Kúrenie: nízka teplota", "Nízka") if d == "low" else ("Kúrenie: vysoká teplota", "Vysoká")
-            ok = _send(cfg, ttl, "%s teplota: %s – %s má %s °C (hranica %s °C) už %d min." % (word, gn, lab, sk(val), sk(limit), mins))
+            ok = _send(cfg, tr("srv.temps." + d + "_t", hl), tr("srv.temps." + d, hl, g=gn, lab=lab, v=i18n.dec(sk(val), hl), lim=i18n.dec(sk(limit), hl), n=mins))
             m.update(sent=now, ok=bool(ok), n=m["n"] + 1)
             changed, sent = True, sent + 1
     if changed:

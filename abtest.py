@@ -5,6 +5,8 @@ Jediný zápis do ESP: select „Režim izbovej regulácie“ = „Posun krivky�
 Stav je v agent.db, tabuľka state, kľúč `abtest` (JSON). tick() volá strážca každú minútu. Iba štandardná knižnica."""
 import datetime, json, math, time, traceback
 import contacts, interventions, notify
+import i18n
+from i18n import tr
 from common import REF_NAME, REF_ROOM, ROOMS, S, adb, day_bounds, get_state, hour_stats, is_dry, set_state, tcq
 
 KEY = "abtest"
@@ -238,23 +240,24 @@ def read_conditions(cfg, now):
     return {"age": age, "detska": row[0] if row[1] else None, "chyba": ch[0][0] if ch else None, "backup": backup}
 
 
-def safety(cfg, now):
+def safety(cfg, now, lang="sk"):
     """(ok, dôvod). Poistky z bodu 3 špecifikácie."""
     cd = read_conditions(cfg, now)
+    n = lambda v: i18n.dec(sk(v), lang)
     if cd.get("age") is None or cd["age"] > SAFE_STALE_S:
-        return False, "dáta zberača sú staršie ako 15 min"
+        return False, tr("srv.abtest.s_stare", lang)
     d = cd.get("detska")
     if d is None:
-        return False, "chýbajú dáta z referenčnej izby (%s) za posledných 30 min" % REF_NAME
+        return False, tr("srv.abtest.s_chyba_data", lang, ref=REF_NAME)
     if d > SAFE_HI:
-        return False, "referenčná izba (%s) je príliš teplá (%s °C, hranica %s °C)" % (REF_NAME, sk(d), sk(SAFE_HI))
+        return False, tr("srv.abtest.s_teply", lang, ref=REF_NAME, v=n(d), lim=n(SAFE_HI))
     if d < SAFE_LO:
-        return False, "referenčná izba (%s) je príliš studená (%s °C, hranica %s °C)" % (REF_NAME, sk(d), sk(SAFE_LO))
+        return False, tr("srv.abtest.s_studeny", lang, ref=REF_NAME, v=n(d), lim=n(SAFE_LO))
     ch = cd.get("chyba")
     if ch not in (None, 0, 0.0):
-        return False, "čerpadlo hlási chybový kód %d" % int(ch)
+        return False, tr("srv.abtest.s_kod", lang, code=int(ch))
     if cd.get("backup") is True:
-        return False, "zapol sa elektrický dohrev kúrenia"
+        return False, tr("srv.abtest.s_dohrev", lang)
     return True, ""
 
 
@@ -263,6 +266,7 @@ def safety(cfg, now):
 def tick(cfg, c, now=None):
     """Jeden krok testu. Vracia krátky popis (pre log/testy)."""
     now = int(now or time.time())
+    lang = i18n.home_lang(cfg)
     st = load(c)
     if st is None:
         return "žiadny test"
@@ -281,7 +285,7 @@ def tick(cfg, c, now=None):
     if st["status"] == "planned":
         st["status"] = "running"
         save(c, st)
-        _log_info(c, "Porovnávací test A/B sa začal.")
+        _log_info(c, tr("srv.abtest.log_zacal", lang))
     entry = today_entry(st, now)
     if entry is None:
         return "dnešný deň nie je v pláne"
@@ -294,18 +298,17 @@ def tick(cfg, c, now=None):
     want = entry["mode"] if entry["valid"] else "A"
     urgent = False
     if want == "B":
-        ok, why = safety(cfg, now)
+        ok, why = safety(cfg, now, lang)
         if not ok:
-            entry["valid"], entry["note"] = False, "Poistka: " + why
+            entry["valid"], entry["note"] = False, tr("srv.abtest.poistka", lang, why=why)
             want, urgent = "A", True
             save(c, st)
-            _log_info(c, "Porovnávací test A/B: deň %s sa nevyhodnotí, regulácia podľa izby sa vracia. Dôvod: %s." % (entry["date"], why))
-            _notify(cfg, "Kúrenie: test A/B prerušený na dnešný deň",
-                    "Deň %s porovnávacieho testu sa nevyhodnotí a regulácia podľa izby sa vracia späť. Dôvod: %s. "
-                    "Zvyšok dňa ostáva režim A, test pokračuje ďalším dňom." % (entry["date"], why))
+            _log_info(c, tr("srv.abtest.log_den", lang, d=entry["date"], why=why))
+            _notify(cfg, tr("srv.abtest.n_preruseny_t", lang),
+                    tr("srv.abtest.n_preruseny", lang, d=entry["date"], why=why))
     if cur is not None and cur != OPT[want] and entry["valid"] and sec_of_day(now) >= WINDOW_FROM_H * 3600:
         # režim sa nestihol prepnúť do začiatku vyhodnocovacieho okna: deň by bol skreslený
-        entry["valid"], entry["note"] = False, "režim sa prepol až po 04:00"
+        entry["valid"], entry["note"] = False, tr("srv.abtest.note_po_04", lang)
         if want == "B":
             want = "A"
         save(c, st)
@@ -313,31 +316,33 @@ def tick(cfg, c, now=None):
 
 
 def finish(cfg, c, st, now):
+    lang = i18n.home_lang(cfg)
     st["status"] = "done"
     st["finished"] = now
     try:
-        st["result"] = evaluate(cfg, st, now)
+        st["result"] = evaluate(cfg, st, now, lang)
     except Exception:
         traceback.print_exc()
         st["result"] = None
     save(c, st)
     res = restore_a(cfg, c, st, now)
-    verdict = (st.get("result") or {}).get("verdikt") or "Výsledok sa nepodarilo vypočítať."
-    _log_info(c, "Porovnávací test A/B skončil. " + verdict)
-    _notify(cfg, "Kúrenie: porovnávací test skončil", verdict)
+    verdict = (st.get("result") or {}).get("verdikt") or tr("srv.abtest.vysledok_nie", lang)
+    _log_info(c, tr("srv.abtest.log_skoncil", lang, v=verdict))
+    _notify(cfg, tr("srv.abtest.n_skoncil_t", lang), verdict)
     return "hotovo; " + res
 
 
 def stop(cfg, c, reason="zastavené používateľom", now=None, st=None, restore=True, notify_user=False):
     """Zastaví test. restore=True -> hneď režim A; restore=False (ručná zmena) -> režim sa neprepisuje. Vracia True, ak sa zastavil."""
     now = int(now or time.time())
+    lang = i18n.home_lang(cfg)
     st = st if st is not None else load(c)
     if not active_state(st):
         return False
     today = date_of(now)
     for e in st.get("days") or []:
         if e["date"] >= today and e.get("valid"):
-            e["valid"], e["note"] = False, "test bol zastavený"
+            e["valid"], e["note"] = False, tr("srv.abtest.note_zastaveny", lang)
     st["status"], st["stopped_reason"], st["stopped_ts"] = "stopped", reason, now
     if not restore:
         st["switched_by_test"] = False
@@ -348,17 +353,16 @@ def stop(cfg, c, reason="zastavené používateľom", now=None, st=None, restore
         except Exception:
             traceback.print_exc()
     try:
-        res = evaluate(cfg, st, now)
+        res = evaluate(cfg, st, now, lang)
         if res["A"]["n"] >= MIN_DAYS_STOP and res["B"]["n"] >= MIN_DAYS_STOP:
             st["result"] = res
             save(c, st)
     except Exception:
         traceback.print_exc()
-    _log_info(c, "Porovnávací test A/B zastavený: %s." % reason)
+    _log_info(c, tr("srv.abtest.log_zastaveny", lang, why=reason))
     if notify_user:
-        _notify(cfg, "Kúrenie: porovnávací test zastavený",
-                "Test A/B sa zastavil. Dôvod: %s.%s" % (reason, " Regulácia podľa izby je zapnutá." if restore else
-                                                          " Režim regulácie v čerpadle test už neprepisuje."))
+        _notify(cfg, tr("srv.abtest.n_zastaveny_t", lang),
+                tr("srv.abtest.n_zastaveny", lang, why=reason, tail=tr("srv.abtest.n_zap" if restore else "srv.abtest.n_neprepisuje", lang)))
     return True
 
 
@@ -369,53 +373,54 @@ def _fresh_age(cfg):
     return int(time.time()) - int((r[0][0] if r else 0) or 0)
 
 
-def when_str(ts):
+def when_str(ts, lang="sk"):
+    if lang != "sk":
+        return time.strftime("%d %b at %H:%M", time.localtime(ts)).lstrip("0")
     return time.strftime("%d.%m. o %H:%M", time.localtime(ts)).lstrip("0")
 
 
-def can_start(cfg, c, now=None, esp_mode=_UNSET):
+def can_start(cfg, c, now=None, esp_mode=_UNSET, lang="sk"):
     """(smie, dôvod alebo None, ts kedy sa dá spustiť alebo None)."""
     st = load(c)
     if active_state(st):
-        return False, "Test už prebieha.", None
+        return False, tr("srv.abtest.c_prebieha", lang), None
     if st and st.get("switched_by_test"):
-        return False, "Regulácia podľa izby sa ešte vracia do bežného režimu. Skús to o chvíľu.", None
+        return False, tr("srv.abtest.c_vracia", lang), None
     due = c.execute("SELECT max(due_ts) FROM interventions WHERE status='caka' AND kind='ventil'").fetchone()[0]
     if due:
-        return False, ("Čaká na vyhodnotenie zásah na ventiloch. Test sa dá spustiť najskôr %s, keď sa vyhodnotí "
-                       "(alebo ho zruš v zozname zásahov)." % when_str(due)), int(due)
+        return False, tr("srv.abtest.c_ventily", lang, when=when_str(due, lang)), int(due)
     age = _fresh_age(cfg)
     if age > START_STALE_S:
-        return False, "Dáta zo zberača sú staré (%d min), test sa nedá spustiť." % (age // 60), None
+        return False, tr("srv.abtest.c_stare", lang, n=age // 60), None
     ch = tcq(cfg, "SELECT value FROM samples WHERE entity=? ORDER BY ts DESC LIMIT 1", (S["chyba"],))
     code = ch[0][0] if ch else None
     if code is None or code != 0:
-        return False, "Čerpadlo hlási chybový kód %s, test sa nedá spustiť." % ("neznámy" if code is None else int(code)), None
+        return False, tr("srv.abtest.c_kod", lang, code=(tr("srv.abtest.neznamy", lang) if code is None else int(code))), None
     if esp_mode is _UNSET:
         try:
             esp_mode = read_esp_mode(cfg, timeout=3)
         except Exception:
             esp_mode = None
     if esp_mode is None:
-        return False, "Čerpadlo neodpovedá, nedá sa overiť režim regulácie.", None
+        return False, tr("srv.abtest.c_neodpoveda", lang), None
     if esp_mode != OPT["A"]:
-        return False, "V čerpadle nie je zapnutá regulácia „%s“ (teraz: %s)." % (OPT["A"], esp_mode), None
+        return False, tr("srv.abtest.c_regulacia", lang, a=OPT["A"], now=esp_mode), None
     return True, None, None
 
 
-def start(cfg, c, days, now=None):
+def start(cfg, c, days, now=None, lang="sk"):
     """Naplánuje test od najbližšej polnoci. Vracia (http_kód, telo)."""
     now = int(now or time.time())
     if isinstance(days, bool) or not isinstance(days, (int, float)) or days != int(days) or int(days) not in LENGTHS:
-        return 400, {"error": "Dĺžka testu musí byť 6, 8, 10 alebo 14 dní."}
-    ok, why, _due = can_start(cfg, c, now)
+        return 400, {"error": tr("srv.abtest.dlzka", lang)}
+    ok, why, _due = can_start(cfg, c, now, lang=lang)
     if not ok:
         return 400, {"error": why}
     plan = make_plan(now, int(days))
     st = {"status": "planned", "created": now, "start": plan[0]["date"], "days": plan, "switched_by_test": False,
           "stopped_reason": None, "result": None, "last_written": None, "attempts": {}}
     save(c, st)
-    _log_info(c, "Porovnávací test A/B naplánovaný na %d dní od %s." % (len(plan), plan[0]["date"]))
+    _log_info(c, tr("srv.abtest.log_planovany", i18n.home_lang(cfg), n=len(plan), d=plan[0]["date"]))
     return 200, {"ok": True, "state": st}
 
 
@@ -457,9 +462,10 @@ def _day_raw(cfg, e, c=None):
             "tw2": _mean([h.get("tw2") for h in ok]), "starty": sum(h.get("starty") or 0 for h in ok)}
 
 
-def evaluate(cfg, st, now=None):
+def evaluate(cfg, st, now=None, lang=None):
     """Vyhodnotenie z hour_stats (okno 04:00-24:00 každého skončeného dňa plánu). Vracia štruktúru `result` zo špecifikácie."""
     now = int(now or time.time())
+    lang = lang or i18n.home_lang(cfg)
     entries = st.get("days") or []
     raws = {}
     c = None
@@ -489,14 +495,14 @@ def evaluate(cfg, st, now=None):
         r = raws.get(e["date"])
         if r is None:
             if not d["note"]:
-                d["note"] = "ešte neskončil" if e["date"] >= date_of(now) else "bez dát"
+                d["note"] = tr("srv.abtest.note_neskoncil", lang) if e["date"] >= date_of(now) else tr("srv.abtest.note_bez_dat", lang)
         else:
             d["hours"] = r["hours"]
             d["okna_min"] = r.get("okna_min")
             if d["okna_min"] is not None and d["okna_min"] > VENT_MANY_MIN:
-                d["note"] = (d["note"] + "; " if d["note"] else "") + "veľa vetrania (%d min otvorených okien)" % d["okna_min"]
+                d["note"] = (d["note"] + "; " if d["note"] else "") + tr("srv.abtest.note_vetranie", lang, n=d["okna_min"])
             if r["hours"] < MIN_HOURS:
-                d["note"] = (d["note"] + "; " if d["note"] else "") + "málo dát (%d h z %d)" % (r["hours"], MIN_HOURS)
+                d["note"] = (d["note"] + "; " if d["note"] else "") + tr("srv.abtest.note_malo", lang, h=r["hours"], min=MIN_HOURS)
             else:
                 t_in = _mean([r["rooms"].get(k) for k in common])
                 dT = None if t_in is None or r["t_out"] is None else t_in - r["t_out"]
@@ -504,7 +510,7 @@ def evaluate(cfg, st, now=None):
                 d.update(kwh=_r(r["kwh"], 2), t_in=_r(t_in, 2), t_out=_r(r["t_out"], 2), dT=_r(dT, 2), ua=_r(ua, 5),
                          detska=_r(r["detska"], 2), mimo_pasma_h=r["mimo"], tw2=_r(r["tw2"], 1), starty=r["starty"])
                 if ua is None and not d["note"]:
-                    d["note"] = "spotrebu sa nepodarilo prepočítať (chýba spotreba alebo rozdiel teplôt)"
+                    d["note"] = tr("srv.abtest.note_spotreba", lang)
                 d["valid"] = bool(e.get("valid")) and ua is not None
         out_days.append(d)
 
@@ -529,55 +535,51 @@ def evaluate(cfg, st, now=None):
             neistota = 2 * se / mB * 100.0
             noise = abs(uspora) < neistota
     res = {"days": out_days, "A": gA, "B": gB, "uspora_pct": _r(uspora, 1), "neistota_pct": _r(neistota, 1), "v_ramci_sumu": noise}
-    res["verdikt"] = verdict(res, noise)
+    res["verdikt"] = verdict(res, noise, lang)
     return res
 
 
-def verdict(res, noise):
+def verdict(res, noise, lang="sk"):
     gA, gB, us, ne = res["A"], res["B"], res["uspora_pct"], res["neistota_pct"]
+    sk = lambda v, nd=1, _g=globals()["sk"]: i18n.dec(_g(v, nd), lang)
     if us is None:
-        return ("Zatiaľ nie je dosť platných dní na porovnanie (dni A: %d, dni B: %d). Treba aspoň jeden platný deň z každého režimu, "
-                "na spoľahlivý odhad aspoň dva." % (gA["n"], gB["n"]))
+        return tr("srv.abtest.v_malo_dni", lang, a=gA["n"], b=gB["n"])
     parts = []
     if ne is None:
-        parts.append("Zatiaľ vychádza rozdiel %s %% v prospech %s, ale s jedným dňom v niektorom režime sa neistota odhadnúť nedá."
-                     % (sk(abs(us)), "regulácie podľa izby" if us > 0 else "režimu bez regulácie"))
+        parts.append(tr("srv.abtest.v_zatial", lang, v=sk(abs(us)), who=tr("srv.abtest.v_regulacia" if us > 0 else "srv.abtest.v_bez", lang)))
     elif noise:
-        parts.append("Rozdiel je v rámci šumu, test nepreukázal úsporu (odhad %s %%, neistota ± %s %%)." % (sk(us), sk(ne)))
+        parts.append(tr("srv.abtest.v_sum", lang, us=sk(us), ne=sk(ne)))
     elif us > 0:
-        parts.append("Regulácia podľa izby spotrebovala v priemere o %s %% menej energie na 1 °C rozdielu medzi vnútrom a vonkajškom (neistota ± %s %%)."
-                     % (sk(us), sk(ne)))
+        parts.append(tr("srv.abtest.v_menej", lang, us=sk(us), ne=sk(ne)))
     else:
-        parts.append("Regulácia podľa izby spotrebovala v priemere o %s %% viac energie ako režim bez nej (neistota ± %s %%)."
-                     % (sk(abs(us)), sk(ne)))
+        parts.append(tr("srv.abtest.v_viac", lang, us=sk(abs(us)), ne=sk(ne)))
     if gA["mimo_pasma_h"] is not None and gB["mimo_pasma_h"] is not None:
-        parts.append("Referenčná izba (%s) bola mimo pásma 23 – 24 °C v dňoch A priemerne %s h denne, v dňoch B %s h (priemer %s °C a %s °C)."
-                     % (REF_NAME, sk(gA["mimo_pasma_h"]), sk(gB["mimo_pasma_h"]), sk(gA["detska"]), sk(gB["detska"])))
+        parts.append(tr("srv.abtest.v_pasmo", lang, ref=REF_NAME, a=sk(gA["mimo_pasma_h"]), b=sk(gB["mimo_pasma_h"]), ta=sk(gA["detska"]), tb=sk(gB["detska"])))
     if gA["tw2"] is not None and gB["tw2"] is not None:
-        parts.append("Priemerná výstupná voda: %s °C v dňoch A a %s °C v dňoch B." % (sk(gA["tw2"]), sk(gB["tw2"])))
+        parts.append(tr("srv.abtest.v_voda", lang, a=sk(gA["tw2"]), b=sk(gB["tw2"])))
     warn = []
     if gA["t_out"] is not None and gB["t_out"] is not None and abs(gA["t_out"] - gB["t_out"]) > 3:
-        warn.append("vonkajšia teplota dní A a B sa líši o %s °C, porovnanie je menej spoľahlivé" % sk(abs(gA["t_out"] - gB["t_out"])))
+        warn.append(tr("srv.abtest.v_w_vonku", lang, v=sk(abs(gA["t_out"] - gB["t_out"]))))
     if gA.get("okna_min") is not None and gB.get("okna_min") is not None and abs(gA["okna_min"] - gB["okna_min"]) > 60:
-        warn.append("v dňoch A a B sa líšilo vetranie (%s a %s min denne), porovnanie je menej spoľahlivé" % (sk(gA["okna_min"], 0), sk(gB["okna_min"], 0)))
+        warn.append(tr("srv.abtest.v_w_vetranie", lang, a=sk(gA["okna_min"], 0), b=sk(gB["okna_min"], 0)))
     if min(gA["n"], gB["n"]) < 3:
-        warn.append("platných dní je málo (A: %d, B: %d), ber výsledok ako orientačný" % (gA["n"], gB["n"]))
+        warn.append(tr("srv.abtest.v_w_malo", lang, a=gA["n"], b=gB["n"]))
     if warn:
-        parts.append("Upozornenie: " + "; ".join(warn) + ".")
+        parts.append(tr("srv.abtest.v_upozornenie", lang, w="; ".join(warn)))
     return " ".join(parts[:4])
 
 
 # ---------------------------------------------------------------- pre web a model
 
-def evaluate_cached(cfg, st, now):
-    k = (json.dumps(st.get("days"), sort_keys=True), st.get("status"), int(now) // 900)
+def evaluate_cached(cfg, st, now, lang="sk"):
+    k = (json.dumps(st.get("days"), sort_keys=True), st.get("status"), int(now) // 900, lang)
     if _cache["k"] != k:
-        _cache["v"] = evaluate(cfg, st, now)
+        _cache["v"] = evaluate(cfg, st, now, lang)
         _cache["k"] = k
     return _cache["v"]
 
 
-def api_state(cfg, c, now=None):
+def api_state(cfg, c, now=None, lang="sk"):
     """Odpoveď GET /api/abtest."""
     now = int(now or time.time())
     st = load(c)
@@ -585,7 +587,7 @@ def api_state(cfg, c, now=None):
         esp_mode = read_esp_mode(cfg, timeout=3)
     except Exception:
         esp_mode = None
-    ok, why, _due = can_start(cfg, c, now, esp_mode)
+    ok, why, _due = can_start(cfg, c, now, esp_mode, lang)
     today, result = None, None
     if st:
         if active_state(st):
@@ -596,7 +598,7 @@ def api_state(cfg, c, now=None):
         elif active_state(st):
             try:
                 if any(e["date"] < date_of(now) for e in st.get("days") or []):
-                    result = evaluate_cached(cfg, st, now)
+                    result = evaluate_cached(cfg, st, now, lang)
             except Exception:
                 traceback.print_exc()
     state = {k: v for k, v in st.items() if k != "result"} if st else None

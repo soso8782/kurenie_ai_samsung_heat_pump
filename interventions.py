@@ -3,6 +3,8 @@
 import json, re, time
 from common import REF_NAME, REF_ROOM, ROOMS, ROOM_NAMES, SETTINGS, get_state, hour_stats, set_state, tcq
 import contacts, notify
+import i18n
+from i18n import tr
 from common import adb
 
 SOURCES = ("user_message", "user_manual", "agent", "settings")
@@ -154,65 +156,63 @@ def direction(text):
     return 0
 
 
-def verdict(iv, before, after, delta):
+def verdict(iv, before, after, delta, lang="sk"):
     """Deterministický slovenský verdikt, 2-3 vety."""
     parts = []
+    n = lambda x, nd=1, sign=False: i18n.dec(sk(x, nd, sign), lang)
     dd = {r: v for r, v in delta["diff"].items() if v is not None}
     if dd:
         r, v = max(dd.items(), key=lambda kv: abs(kv[1]))
         if abs(v) >= 0.2:
-            parts.append("Voči referenčnej izbe (%s) sa najviac zmenila izba %s: rozdiel %s → %s °C (%s)." % (
-                REF_NAME, ROOM_NAMES.get(r, r).lower(), sk(before["diff"].get(r), 1, True), sk(after["diff"].get(r), 1, True), sk(v, 1, True)))
+            parts.append(tr("srv.interventions.v_najviac", lang, ref=REF_NAME, room=ROOM_NAMES.get(r, r).lower(), a=n(before["diff"].get(r), 1, True), b=n(after["diff"].get(r), 1, True), v=n(v, 1, True)))
         else:
-            parts.append("Žiadna izba sa voči referenčnej izbe (%s) nezmenila o viac než 0,2 °C." % REF_NAME)
+            parts.append(tr("srv.interventions.v_ziadna", lang, ref=REF_NAME))
     else:
-        parts.append("Rozdiely izieb voči referenčnej izbe (%s) sa nedali porovnať (chýbajú dáta)." % REF_NAME)
+        parts.append(tr("srv.interventions.v_nedali", lang, ref=REF_NAME))
     room, dr = iv.get("room"), direction(iv.get("text"))
     if room in ROOMS:
         v = delta["rooms"].get(REF_ROOM) if room == REF_ROOM else delta["diff"].get(room)
-        what = "teplota" if room == REF_ROOM else "rozdiel voči referenčnej izbe"
+        what = tr("srv.interventions.w_teplota" if room == REF_ROOM else "srv.interventions.w_rozdiel", lang)
         if v is None:
-            s = "Cieľovú izbu (%s) sa nepodarilo porovnať." % ROOM_NAMES[room].lower()
+            s = tr("srv.interventions.s_nepodarilo", lang, room=ROOM_NAMES[room].lower())
         elif dr and abs(v) >= 0.2:
-            s = "Cieľová izba (%s): %s %s °C, %s očakávanému smeru." % (
-                ROOM_NAMES[room].lower(), what, sk(v, 1, True), "zodpovedá" if v * dr > 0 else "nezodpovedá")
+            s = tr("srv.interventions.s_smer", lang, room=ROOM_NAMES[room].lower(), what=what, v=n(v, 1, True), smer=tr("srv.interventions.zodpoveda" if v * dr > 0 else "srv.interventions.nezodpoveda", lang))
         elif dr:
-            s = "Cieľová izba (%s) sa nepohla (%s %s °C), očakával sa pohyb %s." % (
-                ROOM_NAMES[room].lower(), what, sk(v, 1, True), "hore" if dr > 0 else "dole")
+            s = tr("srv.interventions.s_nepohla", lang, room=ROOM_NAMES[room].lower(), what=what, v=n(v, 1, True), smer=tr("srv.interventions.hore" if dr > 0 else "srv.interventions.dole", lang))
         else:
-            s = "Cieľová izba (%s): %s sa zmenil o %s °C." % (ROOM_NAMES[room].lower(), what, sk(v, 1, True))
+            s = tr("srv.interventions.s_zmenil", lang, room=ROOM_NAMES[room].lower(), what=what, v=n(v, 1, True))
         parts.append(s)
     pct = delta.get("kwh_na_stupen_pct")
     if pct is not None:
-        parts.append("Spotreba na 1 °C sa zmenila o %s %% (%s → %s kWh/°C)." % (
-            sk(pct, 0, True), sk(before["kwh_na_stupen"], 2), sk(after["kwh_na_stupen"], 2)))
+        parts.append(tr("srv.interventions.spotreba_pct", lang, pct=n(pct, 0, True), a=n(before["kwh_na_stupen"], 2), b=n(after["kwh_na_stupen"], 2)))
     else:
-        parts.append("Spotreba na 1 °C sa nedá porovnať (málo studený deň alebo chýbajú dáta).")
+        parts.append(tr("srv.interventions.spotreba_nie", lang))
     warn = []
     if delta.get("vonku") is not None and abs(delta["vonku"]) > 3:
-        warn.append("vonkajší priemer sa líši o %s °C, porovnanie je menej spoľahlivé" % sk(abs(delta["vonku"]), 1))
+        warn.append(tr("srv.interventions.warn_vonku", lang, v=n(abs(delta["vonku"]), 1)))
     if after.get("dt_beh") is not None and after["dt_beh"] > 6.5:
-        warn.append("ΔT po zásahu je %s °C, podozrenie na nízky prietok" % sk(after["dt_beh"], 1))
+        warn.append(tr("srv.interventions.warn_dt", lang, v=n(after["dt_beh"], 1)))
     d_ok = delta.get("okna_min")
     if d_ok is not None and abs(d_ok) > 60:
-        parts.append("Počas jedného z období sa viac vetralo, porovnanie je menej spoľahlivé.")
+        parts.append(tr("srv.interventions.vetralo", lang))
     text = " ".join(parts)
     if warn:
-        text += " Upozornenie: " + "; ".join(warn) + "."
+        text += " " + tr("srv.interventions.upozornenie", lang, w="; ".join(warn))
     return text
 
 
-def evaluate(cfg, iv, c=None):
+def evaluate(cfg, iv, c=None, lang=None):
     """Vyhodnotenie jedného zásahu. Vracia (result_dict, dosť_dát)."""
+    lang = lang or i18n.home_lang(cfg)
     ts = iv["ts"]
     before, nb = window_stats(cfg, ts - EVAL_AFTER_S, ts, c)
     after, na = window_stats(cfg, ts, ts + EVAL_AFTER_S, c)
     delta = make_delta(before, after)
     enough = nb >= MIN_HOURS and na >= MIN_HOURS
     if enough:
-        vt = verdict(iv, before, after, delta)
+        vt = verdict(iv, before, after, delta, lang)
     else:
-        vt = "Nedostatok dát na vyhodnotenie (pred: %d h, po: %d h; treba aspoň %d h v oboch oknách)." % (nb, na, MIN_HOURS)
+        vt = tr("srv.interventions.nedostatok", lang, nb=nb, na=na, min=MIN_HOURS)
     return {"before": before, "after": after, "delta": delta, "verdict_text": vt}, enough
 
 
@@ -238,8 +238,8 @@ def evaluate_due(cfg, c, now=None):
         done.append(iv["id"])
         if enough:
             try:
-                notify.event(cfg, "vyhodnotenie", "Kúrenie: vyhodnotenie zásahu",
-                             "Zásah „%s“: %s" % (iv["text"][:120], res["verdict_text"]))
+                notify.event(cfg, "vyhodnotenie", tr("srv.interventions.notify_t", i18n.home_lang(cfg)),
+                             tr("srv.interventions.notify_text", i18n.home_lang(cfg), t=iv["text"][:120], v=res["verdict_text"]))
             except Exception:
                 pass
     return done
@@ -277,7 +277,7 @@ def scan_settings(cfg, c, now=None):
 
     def flush(g):
         kind = "krivka" if any(e in CURVE_ENTITIES for _t, e, _o, _n in g) else "nastavenie"
-        text = "Ručná zmena nastavení: " + "; ".join("%s: %s → %s" % (e, o, n) for _t, e, o, n in g)
+        text = tr("srv.interventions.zmena_nastaveni", i18n.home_lang(cfg), v="; ".join("%s: %s → %s" % (e, o, n) for _t, e, o, n in g))
         add(c, "settings", kind, None, text, ts=g[0][0])
 
     i = 0

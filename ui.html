@@ -945,6 +945,19 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
       </form>
     </section>
 
+    <section class="panel pad sgroup" id="haintsettings">
+      <h3 data-i18n="nastavenia.haint_titul">Integrácia do Home Assistanta</h3>
+      <div class="hastat"><span class="dot" id="haintdot"></span><span id="haintstat"></span></div>
+      <p class="sub" data-i18n="nastavenia.haint_popis">Integrácia „Kúrenie AI“ (custom_components/kurenie_ai, inštalácia cez HACS) zobrazí v Home Assistante izby, vodu, kompresor, TÚV a agenta a umožní meniť režim agenta a cieľovú teplotu. Pri pridaní integrácie zadaj adresu tejto aplikácie a kľúč.</p>
+      <div class="sub"><span data-i18n="nastavenia.haint_adresa">Adresa aplikácie pre integráciu:</span> <code id="haintaddr"></code></div>
+      <div id="haintkeybox" hidden style="margin-top:10px">
+        <label for="haintkey" data-i18n="nastavenia.haint_novy">Nový kľúč (zobrazí sa len teraz – skopíruj ho):</label>
+        <div class="inrow"><input type="text" id="haintkey" readonly spellcheck="false"><button type="button" class="btn" id="haintcopy" data-i18n="nastavenia.haint_kopirovat">Kopírovať</button></div>
+      </div>
+      <div class="btnrow"><button class="btn primary" type="button" id="haintnew" data-i18n="nastavenia.haint_vytvorit">Vytvoriť kľúč</button><button class="btn" type="button" id="haintrevoke" data-i18n="nastavenia.haint_zrusit">Zrušiť kľúč</button></div>
+      <span id="haintmsg" class="sub" role="status"></span>
+    </section>
+
     <section class="panel pad sgroup" id="mqsettings">
       <h3 data-i18n="nastavenia.mqtt_titul">MQTT (okná priamo zo Zigbee2MQTT)</h3>
       <div class="hastat"><span class="dot grey" id="mqdot"></span><span id="mqstat" data-i18n="spolocne.nacitavam_m">načítavam…</span></div>
@@ -1054,6 +1067,11 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
         <label for="llmgap" data-i18n="nastavenia.llmgap">Najdlhšia pauza medzi volaniami modelu (hodiny)</label>
         <input type="number" id="llmgap" min="1" max="12" step="1" inputmode="numeric">
         <div class="sub" data-i18n="nastavenia.llmgap_popis">Keď sa nič nedeje, agent model nevolá. Aspoň raz za túto dobu ho zavolá vždy; kratšia pauza stojí viac kreditu.</div>
+        <label for="uilang" data-i18n="nastavenia.jazyk_domacnosti">Jazyk upozornení a agenta</label>
+        <select id="uilang">
+          <option value="sk" data-i18n="nastavenia.jazyk_domacnosti_sk">Slovenčina</option><option value="en" data-i18n="nastavenia.jazyk_domacnosti_en">English</option>
+        </select>
+        <div class="sub" data-i18n="nastavenia.jazyk_domacnosti_popis">Jazyk upozornení na telefón, hodnotení a správ agenta, týždenného súhrnu a názvov senzorov v Home Assistante. Jazyk samotného webu sa prepína v hornej lište.</div>
         <div class="btnrow">
           <button class="btn primary" type="submit" data-i18n="spolocne.ulozit">Uložiť</button>
           <button class="btn" type="button" id="testkey" data-i18n="spolocne.otestovat">Otestovať spojenie</button>
@@ -1714,7 +1732,7 @@ setTheme(document.documentElement.dataset.theme || "auto");
 let authed = false;
 /* Neúspešná odpoveď (nie 2xx) sa vráti ako objekt s `error`. 401 počas prihlásenej relácie vráti na prihlásenie a vyhodí chybu s `auth`. */
 async function api(path, body) {
-  const o = body ? {method: "POST", headers: {"Content-Type": "application/json", "X-Kurenie": "1"}, body: JSON.stringify(body)} : {cache: "no-store"};
+  const o = body ? {method: "POST", headers: {"Content-Type": "application/json", "X-Kurenie": "1", "X-Lang": LANG}, body: JSON.stringify(body)} : {cache: "no-store", headers: {"X-Lang": LANG}};
   const res = await fetch(path, o);
   let j = null; try { j = await res.json(); } catch (e) {}
   if (res.status === 401 && authed) { gateEntry(); const er = new Error("auth"); er.auth = true; throw er; }
@@ -2392,7 +2410,7 @@ async function loadStatus() {
   if (!document.querySelector("#last .undoask")) $("#last").innerHTML = s.last_run ? runHtml(s.last_run, false, true) : `<div class="empty">${t("agent.zatial_nebezal")}</div>`;
   renderSettingsStatus(s);
   abPill(s.abtest);
-  renderSeason(s); renderHa(s.ha); renderTunnel(s.tunnel); renderBadges(s);
+  renderSeason(s); renderHa(s.ha); renderHaInt(s.ha_api); renderTunnel(s.tunnel); renderBadges(s);
   const bal = s.balance, cr = $("#credit");
   if (bal && bal.left != null) {
     const perDay = s.avg_cost ? s.avg_cost * (1440 / (s.interval || 60)) + 0.002 : null, days = perDay ? Math.floor(Math.max(0, bal.left) / perDay) : null;
@@ -2633,6 +2651,7 @@ $("#interval").onchange = () => { window.__ivDirty = 1; intervalHint(); };
 $("#model").oninput = () => { window.__modelDirty = 1; modelHint(); };
 $("#fbmodel").oninput = () => { window.__fbDirty = 1; };
 $("#llmgap").oninput = () => { window.__gapDirty = 1; };
+$("#uilang").onchange = () => { window.__ulDirty = 1; };
 $("#showkey").onclick = () => { const i = $("#apikey"), show = i.type === "password"; i.type = show ? "text" : "password"; $("#showkey").textContent = show ? t("spolocne.skryt") : t("spolocne.zobrazit"); };
 $("#setform").onsubmit = guard(async e => { e.preventDefault(); const body = {}, key = $("#apikey").value.trim(), model = $("#model").value.trim();
   if (key) body.api_key = key; if (model && model !== statusData?.model) body.model = model;
@@ -2642,10 +2661,11 @@ $("#setform").onsubmit = guard(async e => { e.preventDefault(); const body = {},
   if (statusData?.llm_max_gap_h != null || window.__gapDirty) {
     if (!Number.isInteger(gap) || gap < 1 || gap > 12) return setMsg(t("nastavenia.pauza_chyba"), false);
     if (gap !== statusData?.llm_max_gap_h) body.llm_max_gap_h = gap; }
+  const ul = $("#uilang").value; if (ul !== (statusData?.ui_lang || "sk")) body.ui_lang = ul;
   if (!Object.keys(body).length) return setMsg(t("nastavenia.nic_zmenene"));
   setMsg(t("spolocne.ukladam")); const r = await api("api/settings", body);
   if (r.error) return setMsg(r.error, false);
-  $("#apikey").value = ""; $("#apikey").type = "password"; $("#showkey").textContent = t("spolocne.zobrazit"); window.__modelDirty = 0; window.__ivDirty = 0; window.__fbDirty = 0; window.__gapDirty = 0;
+  $("#apikey").value = ""; $("#apikey").type = "password"; $("#showkey").textContent = t("spolocne.zobrazit"); window.__modelDirty = 0; window.__ivDirty = 0; window.__fbDirty = 0; window.__gapDirty = 0; window.__ulDirty = 0;
   await new Promise(r => setTimeout(r, 400)); await loadStatus(); modelHint(); setTimeout(() => loadStatus().catch(() => {}), 20000); setMsg(t("nastavenia.ulozene_beh"), true); }, "#setmsg");
 
 /* nastavenia: stavové údaje zo status (upozornenia, ohrev vody, záložný model, pauza) */
@@ -2653,6 +2673,7 @@ const fmtT = v => { if (v == null || v === "") return "–"; if (typeof v === "n
 function renderSettingsStatus(s) {
   if (document.activeElement !== $("#fbmodel") && !window.__fbDirty) $("#fbmodel").value = s.fallback_model ?? "";
   if (document.activeElement !== $("#llmgap") && !window.__gapDirty) $("#llmgap").value = s.llm_max_gap_h ?? "";
+  if (document.activeElement !== $("#uilang") && !window.__ulDirty) $("#uilang").value = s.ui_lang || "sk";
   const n = s.notify, ns = $("#notifystate");
   if (!n) { ns.textContent = tr("nastavenia.stav_nedostupny"); }
   else {
@@ -3148,6 +3169,30 @@ function haView(h) {
   if (h.ok) return {cls: "ok", text: t("spolocne.pripojene") + (h.count != null ? " · " + h.count + " " + tn("cidla.senzor_pl", h.count) : "") + (h.last_ok ? t("nastavenia.ha_posledne_citanie", {v: hhmm(h.last_ok)}) : ""), short: t("spolocne.pripojene") + (h.last_ok ? " · " + hhmm(h.last_ok) : ""), tip: t("nastavenia.ha_tip_ok")};
   return {cls: "bad", text: t("nastavenia.ha_chyba", {v: h.error || t("spolocne.ha_neodpoveda")}), short: t("nastavenia.ha_chyba_spojenia"), tip: h.error || t("spolocne.ha_neodpoveda")};
 }
+/* integrácia Home Assistant: kľúč pre custom component kurenie_ai (v DB len odtlačok; nový kľúč sa ukáže raz) */
+function renderHaInt(info) {
+  const st = $("#haintstat"); if (!st) return;
+  const set = !!(info && info.set);
+  $("#haintdot").className = "dot " + (set ? "ok" : "");
+  st.textContent = set ? t("nastavenia.haint_nastaveny", {d: info.created ? new Date(info.created * 1000).toLocaleString(LOCALE) : "–"}) : t("nastavenia.haint_nenastaveny");
+  $("#haintrevoke").hidden = !set;
+  $("#haintaddr").textContent = location.origin;
+}
+$("#haintnew").onclick = guard(async () => {
+  if (statusData?.ha_api?.set && !confirm(t("nastavenia.haint_potvrd_novy"))) return;
+  const r = await api("api/ha_key", {});
+  if (r.error || !r.key) return say("#haintmsg", r.error || t("spolocne.neznama_chyba"), false);
+  $("#haintkey").value = r.key; $("#haintkeybox").hidden = false; renderHaInt(r.info);
+  say("#haintmsg", t("nastavenia.haint_vytvoreny"), true);
+}, "#haintmsg");
+$("#haintcopy").onclick = async () => { const i = $("#haintkey"); i.select();
+  try { await navigator.clipboard.writeText(i.value); say("#haintmsg", t("nastavenia.haint_skopirovany"), true); } catch (e) { document.execCommand && document.execCommand("copy"); } };
+$("#haintrevoke").onclick = guard(async () => {
+  if (!confirm(t("nastavenia.haint_potvrd_zrusit"))) return;
+  const r = await api("api/ha_key_revoke", {});
+  if (r.error) return say("#haintmsg", r.error, false);
+  $("#haintkeybox").hidden = true; $("#haintkey").value = ""; renderHaInt(r.info); say("#haintmsg", t("nastavenia.haint_zruseny"), true);
+}, "#haintmsg");
 function renderHa(h) {
   const v = haView(h);
   $("#hadot").className = "dot " + v.cls; $("#hanav").title = v.tip; $("#hanav").setAttribute("aria-label", "Home Assistant: " + v.tip);
@@ -3171,9 +3216,13 @@ $("#haform").onsubmit = guard(async e => { e.preventDefault(); const body = {}, 
   if (r.error) return say("#hamsg", r.error, false);
   $("#hatoken").value = ""; $("#hatoken").type = "password"; $("#hashow").textContent = t("spolocne.zobrazit"); window.__haUrlDirty = 0;
   say("#hamsg", t("nastavenia.ha_ulozene"), true); await loadStatus(); haWatchStart(); }, "#hamsg");
-$("#hatest").onclick = guard(async () => { if ($("#hatoken").value.trim() || window.__haUrlDirty) return say("#hamsg", t("nastavenia.najprv_uloz"), false);
+$("#hatest").onclick = guard(async () => {
+  /* otestuje aj ešte neuložený token / adresu (nič sa neukladá) */
+  const tb = {}, tk = $("#hatoken").value.trim(), url = $("#haurl").value.trim();
+  if (tk) tb.ha_token = tk; if (window.__haUrlDirty && url) tb.ha_url = url;
+  if (tb.ha_url && !/^https?:\/\//i.test(tb.ha_url)) return say("#hamsg", t("nastavenia.adresa_http"), false);
   const b = $("#hatest"); b.disabled = true; say("#hamsg", t("nastavenia.testujem"));
-  try { const r = await api("api/ha_test", {}); say("#hamsg", r.ok ? t("nastavenia.ha_funguje", {n: r.count}) : t("spolocne.zlyhalo", {v: r.error || t("spolocne.neznama_chyba")}), !!r.ok); }
+  try { const r = await api("api/ha_test", tb); if (r.error && r.ok === undefined) return say("#hamsg", r.error, false); say("#hamsg", r.ok ? t("nastavenia.ha_funguje", {n: r.count}) : t("spolocne.zlyhalo", {v: r.error || t("spolocne.neznama_chyba")}), !!r.ok); }
   finally { b.disabled = false; } }, "#hamsg");
 
 /* MQTT (okná zo Zigbee2MQTT): stav zapisuje agent do state, web ho len číta */
@@ -3541,7 +3590,7 @@ $("#gateform").onsubmit = async e => { e.preventDefault(); const pw = $("#authpw
   } catch (x) { err.textContent = t("spolocne.server_neodpoveda"); go.disabled = false; } };
 /* prihlásenie cez Cloudflare Access: relácia vzniká až po voľbe roly (Používateľ / Správca s heslom) */
 async function gateEntry(msg) {
-  let a = null; try { a = await (await fetch("api/auth", {cache: "no-store"})).json(); } catch (e) {}
+  let a = null; try { a = await (await fetch("api/auth", {cache: "no-store", headers: {"X-Lang": LANG}})).json(); } catch (e) {}
   if (!a) return showGate("login", msg || t("login.server_obnov"));
   if (a.setup_needed) return showGate("setup");
   if (a.logged_in) return startApp(a);
@@ -3571,7 +3620,7 @@ $("#accpwonly").onclick = e => { e.preventDefault(); showGate("login"); };
 $("#logout").onclick = async () => { try { await api("api/logout", {}); } catch (e) {} gateEntry(); };
 async function startApp(a) {
   authed = true; $("#gate").hidden = true; $("#apptop").hidden = $("#main").hidden = false;
-  if (!a) { try { a = await (await fetch("api/auth", {cache: "no-store"})).json(); } catch (e) { a = null; } }
+  if (!a) { try { a = await (await fetch("api/auth", {cache: "no-store", headers: {"X-Lang": LANG}})).json(); } catch (e) { a = null; } }
   /* prihlásenie heslom = správca; rolu určí /api/auth (a neskôr /api/status.role) */
   ME = ""; ROLE = "admin"; applyRole(a && a.role, a && a.email);
   window.__modelDirty = window.__ivDirty = window.__fbDirty = window.__gapDirty = 0; chatNote = ""; roomDraft = roomMsg = null; msgList = [];

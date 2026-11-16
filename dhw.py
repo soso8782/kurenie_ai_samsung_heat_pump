@@ -7,6 +7,8 @@ Zápis ide VÝLUČNE cez agent.esp_set_number() (ten rešpektuje DRY_RUN). Volá
 """
 import json, time, urllib.request
 import abtest, notify
+import i18n
+from i18n import tr
 import profil
 from common import P, S, get_state, is_dry, set_state, tcq
 
@@ -142,40 +144,40 @@ def _write_target(cfg, value):
     return back is not None and abs(back - value) < 1e-6
 
 
-def can_start(cfg, c):
+def can_start(cfg, c, lang="sk"):
     """(ok, dôvod): agent nie je off, chybový kód 0, dáta čerstvé, booster vypnutý."""
     ag = _agent()
     if not ENT_TARGET:
-        return False, "zariadenie nemá TÚV"
+        return False, tr("srv.dhw.bez_tuv", lang)
     if abtest.active(c):
-        return False, "prebieha porovnávací test"
+        return False, tr("srv.dhw.abtest", lang)
     if get_state(c, "mode", "advise") == "off":
-        return False, "agent je vypnutý"
+        return False, tr("srv.dhw.agent_off", lang)
     r = tcq(cfg, "SELECT v FROM meta WHERE k='last_sample'")
     age = int(time.time()) - int((r[0][0] if r else 0) or 0)
     if age > STALE_S:
-        return False, "dáta zberača sú staré (%d s)" % age
+        return False, tr("srv.dhw.stare", lang, n=age)
     if ENT_ERROR:   # bez entity chybového kódu sa táto poistka preskočí
         code = _num(ag.esp_get(cfg, "sensor", ENT_ERROR).get("value"))
         if code is None or code != 0:
-            return False, "chybový kód TČ = %s" % code
+            return False, tr("srv.dhw.chyba_kod", lang, code=code)
     if ag.esp_get(cfg, "binary_sensor", ENT_BOOSTER).get("value") is not False:
-        return False, "elektrický dohrev TÚV je zapnutý"
+        return False, tr("srv.dhw.booster_on", lang)
     return True, ""
 
 
-def start_boost(cfg, c, w):
+def start_boost(cfg, c, w, lang="sk"):
     """Prihriatie na začiatku okna. Vracia text výsledku."""
-    ok, why = can_start(cfg, c)
+    ok, why = can_start(cfg, c, lang)
     if not ok:
-        return "čaká: " + why
+        return tr("srv.dhw.caka", lang, why=why)
     base = _num(_agent().esp_get(cfg, "number", ENT_TARGET).get("value"))
     marker = "%s %s" % (w["date"], w["start"])
     if base is None:
-        return "čaká: cieľ TÚV sa nepodarilo prečítať"
+        return tr("srv.dhw.caka_cielovy", lang)
     if base >= T_MAX or base < T_MIN:
         set_state(c, "dhw_done", marker)
-        return "nič: pôvodný cieľ TÚV %s mimo 40-52 (alebo už 52)" % base
+        return tr("srv.dhw.nic_mimo", lang, base=base)
     new = min(base + T_STEP, T_MAX)
     set_state(c, "dhw_base", base)
     set_state(c, "dhw_boost_value", new)
@@ -185,34 +187,45 @@ def start_boost(cfg, c, w):
     except Exception as e:
         _log_action(c, base, new, REASON_UP, 0, "chyba zápisu: %s" % e)
         set_state(c, "dhw_boosted", "0")
-        return "chyba zápisu: %s" % e
+        return tr("srv.dhw.zapis_chyba", lang, err=e)
     set_state(c, "dhw_boosted", "1")    # aj pri nepotvrdenom zápise: na konci okna sa hodnota vráti
     _log_action(c, base, new, "%s %s-%s" % (REASON_UP, w["start"], w["end"]), 1 if good else 0,
                 ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
-    return "prihriate %s -> %s" % (base, new)
+    return tr("srv.dhw.prihriate", lang, base=base, new=new)
 
 
-def restore(cfg, c, why):
+def restore(cfg, c, why, lang="sk"):
     """Vráti pôvodný cieľ TÚV. Ak ho medzitým niekto zmenil ručne (nie je to naša hodnota), nechá ho tak. Vracia text."""
     base = _num(get_state(c, "dhw_base"))
     bv = _num(get_state(c, "dhw_boost_value"))
     if base is None or not (T_MIN <= base <= T_MAX):
         set_state(c, "dhw_boosted", "0")
-        return "nie je čo vracať"
+        return tr("srv.dhw.nie_je_co", lang)
     ag = _agent()
     cur = None if is_dry(cfg) else _num(ag.esp_get(cfg, "number", ENT_TARGET).get("value"))
     if not is_dry(cfg) and cur is None:
-        raise RuntimeError("cieľ TÚV sa nepodarilo prečítať, skúsim znova")
+        raise RuntimeError(tr("srv.dhw.cielovy_precitat_znova", lang))
     if is_dry(cfg) or bv is None or abs(cur - bv) < 1e-6:
         good = _write_target(cfg, base)
         _log_action(c, bv, base, "%s (%s)" % (REASON_DOWN, why), 1 if good else 0,
                     ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
-        res = "vrátené na %s (%s)" % (base, why)
+        res = tr("srv.dhw.vratene", lang, base=base, why=_why(why, lang))
     else:
         _log_action(c, cur, cur, "%s (%s)" % (REASON_DOWN, why), 0, "hodnotu medzitým zmenil používateľ (%s) - ponechané" % cur)
-        res = "ponechané: používateľ zmenil cieľ na %s" % cur
+        res = tr("srv.dhw.ponechane", lang, cur=cur)
     set_state(c, "dhw_boosted", "0")
     return res
+
+
+_WHY = {"zapol sa elektrický dohrev TÚV": "booster", "koniec času ohrevu": "koniec_casu", "bojler dosiahol cieľ": "ciel",
+        "plánovač vypnutý": "plan_off", "koniec okna": "koniec_okna"}
+
+
+def _why(why, lang):
+    """dôvod vrátenia cieľa v texte výsledku (do DB sa zapisuje po slovensky)"""
+    if lang == "sk" or why not in _WHY:
+        return why
+    return tr("srv.dhw.why_" + _WHY[why], lang)
 
 
 def _fmt(v):
@@ -231,19 +244,19 @@ def manual_status(c, now=None):
             "last": (int(_num(get_state(c, "dhw_manual_last", ""))) if _num(get_state(c, "dhw_manual_last", "")) is not None else None)}
 
 
-def manual_start(cfg, c, target, who, now=None):
+def manual_start(cfg, c, target, who, now=None, lang="sk"):
     """Manuálny ohrev z webu: dočasne zvýši cieľ TÚV (45-52, krok 1). Vracia (ok, text)."""
     now = now or time.time()
     t = _num(target)
     if isinstance(target, bool) or t is None or not (MANUAL_MIN <= t <= MANUAL_MAX_T) or abs(t - round(t)) > 1e-9:
-        return False, "Teplota musí byť 45 až 52 °C po 1 °C."
+        return False, tr("srv.dhw.teplota_rozsah", lang)
     t = float(round(t))
-    ok, why = can_start(cfg, c)
+    ok, why = can_start(cfg, c, lang)
     if not ok:
-        return False, "Ohrev teraz nejde: %s." % why
+        return False, tr("srv.dhw.nejde", lang, why=why)
     last = _num(get_state(c, "dhw_manual_last", ""))
     if last is not None and now - last < MANUAL_GAP_S:
-        return False, "Ďalší ohrev môžeš spustiť o %d min." % max(1, int((MANUAL_GAP_S - (now - last) + 59) // 60))
+        return False, tr("srv.dhw.dalsi", lang, n=max(1, int((MANUAL_GAP_S - (now - last) + 59) // 60)))
     was_boosted = get_state(c, "dhw_boosted", "0") == "1"
     old_until = get_state(c, "dhw_manual_until", "")
     if was_boosted and _num(get_state(c, "dhw_base")) is not None:
@@ -254,9 +267,9 @@ def manual_start(cfg, c, target, who, now=None):
         except Exception:
             base = None
         if base is None:
-            return False, "Cieľ TÚV sa nepodarilo prečítať."
+            return False, tr("srv.dhw.ciel_precitat", lang)
     if t <= base:
-        return False, "Cieľ TÚV je už %s °C, zvoľ vyššiu teplotu." % _fmt(base)
+        return False, tr("srv.dhw.vyssia", lang, base=i18n.dec(_fmt(base), lang))
     old_bv = get_state(c, "dhw_boost_value", "")
     set_state(c, "dhw_base", base)
     set_state(c, "dhw_boost_value", t)
@@ -270,36 +283,36 @@ def manual_start(cfg, c, target, who, now=None):
         set_state(c, "dhw_manual_until", old_until)
         set_state(c, "dhw_boosted", "1" if was_boosted else "0")
         _log_action(c, base, t, reason, 0, "chyba zápisu: %s" % e)
-        return False, "Zápis zlyhal: %s" % e
+        return False, tr("srv.dhw.zapis_zlyhal", lang, err=e)
     set_state(c, "dhw_boosted", "1")    # aj pri nepotvrdenom zápise: na konci sa hodnota vráti
     _log_action(c, base, t, reason, 1 if good else 0,
                 ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
-    text = "Ohrev spustený: cieľ TÚV %s °C, najdlhšie do %s." % (_fmt(t), time.strftime("%H:%M", time.localtime(now + MANUAL_MAX_S)))
+    text = tr("srv.dhw.spusteny", lang, t=i18n.dec(_fmt(t), lang), until=time.strftime("%H:%M", time.localtime(now + MANUAL_MAX_S)))
     if is_dry(cfg):
-        text += " (testovacie prostredie, nezapísané)"
+        text += tr("srv.dhw.testovacie", lang)
     return True, text
 
 
-def manual_stop(cfg, c, who):
+def manual_stop(cfg, c, who, lang="sk"):
     """Zastaví manuálny ohrev a vráti pôvodný cieľ. Vracia (ok, text)."""
     if _num(get_state(c, "dhw_manual_until", "")) is None:
-        return False, "Manuálny ohrev nebeží."
+        return False, tr("srv.dhw.nebezi", lang)
     base = _num(get_state(c, "dhw_base"))
     try:
-        restore(cfg, c, "zastavené z webu (%s)" % who)
+        restore(cfg, c, "zastavené z webu (%s)" % who, lang)
     except RuntimeError as e:
-        return False, "Ohrev sa nepodarilo zastaviť: %s." % e
+        return False, tr("srv.dhw.stop_chyba", lang, err=e)
     set_state(c, "dhw_manual_until", "")
-    return True, "Ohrev zastavený, cieľ TÚV vrátený na %s °C." % (_fmt(base) if base is not None else "?")
+    return True, tr("srv.dhw.zastaveny", lang, base=i18n.dec(_fmt(base), lang) if base is not None else "?")
 
 
-def set_target_manual(cfg, c, value, who):
+def set_target_manual(cfg, c, value, who, lang="sk"):
     """Trvalá zmena cieľa TÚV z webu (správca; 40-52, celé číslo, nie počas ohrevu). Vracia (ok, text)."""
     if get_state(c, "dhw_boosted", "0") == "1":
-        return False, "Počas ohrevu cieľ nemeň, najprv ho zastav."
+        return False, tr("srv.dhw.pocas_ohrevu", lang)
     v = _num(value)
     if isinstance(value, bool) or v is None or not (T_MIN <= v <= T_MAX) or abs(v - round(v)) > 1e-9:
-        return False, "Cieľ TÚV musí byť celé číslo od 40 do 52 °C."
+        return False, tr("srv.dhw.ciel_cele", lang)
     v = float(round(v))
     old = None
     if not is_dry(cfg):
@@ -312,12 +325,12 @@ def set_target_manual(cfg, c, value, who):
         good = _write_target(cfg, v)
     except Exception as e:
         _log_action(c, old, v, reason, 0, "chyba zápisu: %s" % e)
-        return False, "Zápis zlyhal: %s" % e
+        return False, tr("srv.dhw.zapis_zlyhal", lang, err=e)
     _log_action(c, old, v, reason, 1 if good else 0,
                 ("DRY_RUN (neodoslané)" if is_dry(cfg) else "zapísané a overené") if good else "zápis NEPOTVRDENÝ")
     if not good:
-        return False, "Zápis cieľa TÚV sa nepodarilo potvrdiť."
-    return True, "Cieľ TÚV je %s °C." % _fmt(v)
+        return False, tr("srv.dhw.nepotvrdit", lang)
+    return True, tr("srv.dhw.ciel_je", lang, v=i18n.dec(_fmt(v), lang))
 
 
 def _bojler_now(cfg, now):
@@ -333,7 +346,7 @@ def _bojler_now(cfg, now):
     return float(r[0][1])
 
 
-def _tick_manual(cfg, c, now):
+def _tick_manual(cfg, c, now, lang="sk"):
     """Vetva ticku pre manuálny ohrev z webu (dhw_manual_until je číslo)."""
     until = _num(get_state(c, "dhw_manual_until", ""))
     try:
@@ -341,56 +354,55 @@ def _tick_manual(cfg, c, now):
     except Exception:
         booster_on = False
     if booster_on:
-        res = restore(cfg, c, "zapol sa elektrický dohrev TÚV")
+        res = restore(cfg, c, "zapol sa elektrický dohrev TÚV", lang)
         set_state(c, "dhw_manual_until", "")
-        notify.event(cfg, "tuv", "Kúrenie: manuálny ohrev TÚV zrušený",
-                     "Manuálny ohrev vody bol zrušený, pretože sa zapol elektrický dohrev TÚV (booster). Cieľová teplota TÚV: %s." % res)
-        return "manuálny ohrev: booster: " + res
+        notify.event(cfg, "tuv", tr("srv.dhw.manual_rus_t", lang), tr("srv.dhw.manual_rus", lang, res=res))
+        return tr("srv.dhw.t_manual_booster", lang, res=res)
     if now >= until:
-        res = restore(cfg, c, "koniec času ohrevu")
+        res = restore(cfg, c, "koniec času ohrevu", lang)
         set_state(c, "dhw_manual_until", "")
-        return "manuálny ohrev: koniec času: " + res
+        return tr("srv.dhw.t_manual_koniec", lang, res=res)
     bv = _num(get_state(c, "dhw_boost_value"))
     b = _bojler_now(cfg, now)
     if b is not None and bv is not None and b >= bv - 0.5:
-        res = restore(cfg, c, "bojler dosiahol cieľ")
+        res = restore(cfg, c, "bojler dosiahol cieľ", lang)
         set_state(c, "dhw_manual_until", "")
-        return "manuálny ohrev: bojler dosiahol cieľ: " + res
-    return "manuálny ohrev beží"
+        return tr("srv.dhw.t_manual_ciel", lang, res=res)
+    return tr("srv.dhw.t_manual_bezi", lang)
 
 
 def tick(cfg, c, now=None):
     """Jeden krok plánovača (z watchdogu každú minútu). Vracia krátky popis, čo spravil (pre log/testy)."""
     now = now or time.time()
+    lang = i18n.home_lang(cfg)
     if not ENT_TARGET:
-        return "nečinný (zariadenie nemá TÚV)"
+        return tr("srv.dhw.t_necinny_bez", lang)
     w = ensure_window(cfg, c, now)
     boosted = get_state(c, "dhw_boosted", "0") == "1"
     on = enabled(c)
     inw = in_window(w, now)
     if boosted:
         if _num(get_state(c, "dhw_manual_until", "")) is not None:
-            return _tick_manual(cfg, c, now)
+            return _tick_manual(cfg, c, now, lang)
         # poistka: zapnutý booster počas prihriatia
         try:
             booster_on = _agent().esp_get(cfg, "binary_sensor", ENT_BOOSTER).get("value") is True
         except Exception:
             booster_on = False
         if booster_on:
-            res = restore(cfg, c, "zapol sa elektrický dohrev TÚV")
+            res = restore(cfg, c, "zapol sa elektrický dohrev TÚV", lang)
             set_state(c, "dhw_plan", "0")
             base = _num(get_state(c, "dhw_base"))
-            notify.event(cfg, "tuv", "Kúrenie: plánovač TÚV zrušený",
-                         "Plánovač ohrevu vody bol vypnutý, pretože sa zapol elektrický dohrev TÚV (booster). Cieľová teplota TÚV: %s." % res)
-            return "booster: " + res
+            notify.event(cfg, "tuv", tr("srv.dhw.plan_rus_t", lang), tr("srv.dhw.plan_rus", lang, res=res))
+            return tr("srv.dhw.t_booster", lang, res=res)
         if not on:
-            return "vypnutý z webu: " + restore(cfg, c, "plánovač vypnutý")
+            return tr("srv.dhw.t_vypnuty_web", lang, res=restore(cfg, c, "plánovač vypnutý", lang))
         if not inw:
-            return "koniec okna: " + restore(cfg, c, "koniec okna")
-        return "prihriate, čaká na koniec okna"
+            return tr("srv.dhw.t_koniec_okna", lang, res=restore(cfg, c, "koniec okna", lang))
+        return tr("srv.dhw.t_prihriate_caka", lang)
     if on and inw:
         marker = "%s %s" % (w["date"], w["start"])
         if get_state(c, "dhw_done", "") == marker:
-            return "okno už spracované"
-        return start_boost(cfg, c, w)
-    return "nečinný"
+            return tr("srv.dhw.t_okno_spracovane", lang)
+        return start_boost(cfg, c, w, lang)
+    return tr("srv.dhw.t_necinny", lang)

@@ -12,7 +12,7 @@ import app
 LOC = os.path.join(ROOT, "locales")
 PLURAL = (".1", ".2_4", ".5", ".n")
 PREFIXES = ("nav", "top", "prehlad", "spotreba", "izby", "vonku", "tuv", "den", "cidla", "analyzy", "nastavenia", "zariadenie", "agent",
-            "login", "spolocne", "cas", "stats")
+            "login", "spolocne", "cas", "stats", "srv")
 KEY_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)+$")
 # kľúče skladané za behu ("cas.mes" + číslo mesiaca, "cas.dt_" + deň v týždni): v kóde je len predpona a za ňou `+`
 # šablóny dátumov majú v jazykoch rôzne premenné ({m} v sk, {mon} v en)

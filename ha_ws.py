@@ -10,6 +10,8 @@ Použitie:
 Token sa nikdy nevypisuje ani nelogguje; chybové správy sú po slovensky a neobsahujú token.
 """
 import base64
+
+import ha_auth
 import hashlib
 import json
 import os
@@ -95,7 +97,12 @@ class HAClient:
     def connect(self, url, token, timeout=30):
         """Otvorí WebSocket, prejde handshake a overenie tokenom. Chyby = HAError (bez tokenu)."""
         if not token:
-            raise HAError("Chýba HA_TOKEN v config.env.")
+            raise HAError("Chýba token Home Assistanta (Nastavenia → Home Assistant).")
+        try:
+            ha_auth.check(url, token)
+        except RuntimeError as e:
+            raise HAError(str(e)) from None
+        self._url = url
         tls, host, port, path = ws_target(url)
         self.close()
         self._token = token
@@ -169,9 +176,11 @@ class HAClient:
         msg = self._recv_json()
         typ = msg.get("type")
         if typ == "auth_ok":
+            ha_auth.ok(getattr(self, "_url", ""), self._token)
             return
         if typ == "auth_invalid":
-            raise HAError("Home Assistant odmietol prístupový token (auth_invalid). Skontroluj HA_TOKEN v config.env.")
+            ha_auth.failed(getattr(self, "_url", ""), self._token)
+            raise HAError(ha_auth.message())
         raise HAError("Neočakávaná odpoveď pri overení (typ %s)." % _kind(msg))
 
     # ------------------------------------------------------------ príkazy

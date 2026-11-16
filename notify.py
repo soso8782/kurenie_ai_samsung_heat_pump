@@ -8,6 +8,8 @@ predplatiteľov) sa nikdy nelogujú ani nevracajú v odpovediach.
 import base64, hashlib, ipaddress, json, os, re, threading, time, urllib.request
 from urllib.parse import urlparse
 from common import REF_ROOM, ROOT, adb, is_dry, tcq, S
+import i18n
+from i18n import tr
 try:   # Web Push potrebuje python3-cryptography; ak chýba, webhook funguje ďalej
     import webpush
 except Exception:
@@ -90,17 +92,17 @@ def push_id(endpoint):
     return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()[:16]
 
 
-def validate_subscription(sub):
+def validate_subscription(sub, lang="sk"):
     """-> (endpoint, p256dh, auth) alebo ValueError s textom po slovensky."""
     if not isinstance(sub, dict):
-        raise ValueError("Chýba predplatné zariadenia.")
+        raise ValueError(tr("srv.notify.chyba_predplatne", lang))
     ep = sub.get("endpoint")
     keys = sub.get("keys")
     if not isinstance(ep, str) or not isinstance(keys, dict):
-        raise ValueError("Neplatné predplatné zariadenia.")
+        raise ValueError(tr("srv.notify.neplatne_predplatne", lang))
     ep = ep.strip()
     if not (20 <= len(ep) <= 1000) or not re.fullmatch(r"[\x21-\x7e]+", ep):
-        raise ValueError("Neplatná adresa push služby.")
+        raise ValueError(tr("srv.notify.neplatna_adresa", lang))
     u = urlparse(ep)
     host = (u.hostname or "").lower()
     try:
@@ -108,23 +110,23 @@ def validate_subscription(sub):
     except ValueError:
         port = -1
     if u.scheme != "https" or not host or "." not in host or u.username or u.password or port not in (None, 443):
-        raise ValueError("Adresa push služby musí byť https.")
+        raise ValueError(tr("srv.notify.adresa_https", lang))
     is_ip = True
     try:
         ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         is_ip = False
     if is_ip:
-        raise ValueError("Adresa push služby nesmie byť IP adresa.")
+        raise ValueError(tr("srv.notify.adresa_ip", lang))
     if host.endswith((".local", ".localhost", ".internal", ".lan", ".home", ".test", ".invalid")) or host == "localhost":
-        raise ValueError("Adresa push služby nie je verejná.")
+        raise ValueError(tr("srv.notify.adresa_verejna", lang))
     try:
         p = _b64u_dec(keys.get("p256dh"))
         a = _b64u_dec(keys.get("auth"))
     except (ValueError, TypeError):
-        raise ValueError("Neplatné šifrovacie kľúče zariadenia.")
+        raise ValueError(tr("srv.notify.kluce", lang))
     if len(p) != 65 or p[0] != 4 or len(a) != 16:
-        raise ValueError("Neplatné šifrovacie kľúče zariadenia.")
+        raise ValueError(tr("srv.notify.kluce", lang))
     return ep, _b64u_enc(p), _b64u_enc(a)
 
 
@@ -137,12 +139,12 @@ def _clean_err(text, row=None):
     return t
 
 
-def push_subscribe(cfg, c, email, role, sub, ua):
+def push_subscribe(cfg, c, email, role, sub, ua, lang="sk"):
     """POST /api/push/subscribe: uloží (alebo obnoví) zariadenie pre prihláseného používateľa. -> (code, out)."""
     if webpush is None:
-        return 503, {"error": "Upozornenia na zariadenia nie sú na serveri dostupné."}
+        return 503, {"error": tr("srv.notify.push_nedostupny", lang)}
     try:
-        ep, p256, auth = validate_subscription(sub)
+        ep, p256, auth = validate_subscription(sub, lang)
     except ValueError as e:
         return 400, {"error": str(e)}
     ua = ua if isinstance(ua, str) else ""
@@ -150,7 +152,7 @@ def push_subscribe(cfg, c, email, role, sub, ua):
     now = int(time.time())
     own = c.execute("SELECT endpoint FROM push_subs WHERE email IS ?", (email,)).fetchall()
     if ep not in [r[0] for r in own] and len(own) >= PUSH_MAX_DEVICES_PER_OWNER:
-        return 400, {"error": "Dosiahnutý najvyšší počet zariadení (%d). Niektoré odstráň." % PUSH_MAX_DEVICES_PER_OWNER}
+        return 400, {"error": tr("srv.notify.max_zariadeni", lang, n=PUSH_MAX_DEVICES_PER_OWNER)}
     cur = c.execute("SELECT 1 FROM push_subs WHERE endpoint=?", (ep,)).fetchone()
     if cur:
         c.execute("UPDATE push_subs SET email=?, role=?, p256dh=?, auth=?, ua=?, last_err=NULL WHERE endpoint=?",
@@ -162,10 +164,10 @@ def push_subscribe(cfg, c, email, role, sub, ua):
     return 200, {"ok": True, "id": push_id(ep)}
 
 
-def push_unsubscribe(c, email, endpoint):
+def push_unsubscribe(c, email, endpoint, lang="sk"):
     """POST /api/push/unsubscribe: zmaže iba vlastné zariadenie (podľa e-mailu)."""
     if not isinstance(endpoint, str) or not endpoint.strip():
-        return 400, {"error": "Chýba zariadenie."}
+        return 400, {"error": tr("srv.notify.chyba_zariadenie", lang)}
     cur = c.execute("DELETE FROM push_subs WHERE endpoint=? AND email IS ?", (endpoint.strip(), email))
     c.commit()
     return 200, {"ok": True, "removed": cur.rowcount}
@@ -175,7 +177,7 @@ def _current_roles(c):
     return dict(c.execute("SELECT email, role FROM users").fetchall())
 
 
-def push_status(cfg, c, role, email):
+def push_status(cfg, c, role, email, lang="sk"):
     """GET /api/push/status: správca vidí všetky zariadenia, používateľ iba svoje. Bez endpointov a kľúčov."""
     roles = _current_roles(c)
     rows = c.execute("SELECT endpoint, email, role, ua, created, last_ok, last_err FROM push_subs ORDER BY created, endpoint").fetchall()
@@ -192,18 +194,18 @@ def push_status(cfg, c, role, email):
     return {"configured": webpush is not None, "dry_run": is_dry(cfg), "devices": devices}
 
 
-def push_remove(c, role, email, did):
+def push_remove(c, role, email, did, lang="sk"):
     """POST /api/push/remove {id}: správca kohokoľvek, používateľ iba vlastné."""
     if not isinstance(did, str) or not re.fullmatch(r"[0-9a-f]{16}", did):
-        return 400, {"error": "Neplatné zariadenie."}
+        return 400, {"error": tr("srv.notify.neplatne_zariadenie", lang)}
     for ep, em in c.execute("SELECT endpoint, email FROM push_subs").fetchall():
         if push_id(ep) == did:
             if role != "admin" and em != email:
-                return 403, {"error": "Na túto akciu nemáš oprávnenie."}
+                return 403, {"error": tr("srv.notify.no_perm", lang)}
             c.execute("DELETE FROM push_subs WHERE endpoint=?", (ep,))
             c.commit()
             return 200, {"ok": True}
-    return 404, {"error": "Zariadenie sa nenašlo."}
+    return 404, {"error": tr("srv.notify.nenaslo", lang)}
 
 
 # ---------------------------------------------------------------- odoslanie pushu
@@ -299,21 +301,21 @@ def push_deliver(cfg, c, targets, payload, total_timeout=PUSH_TOTAL_TIMEOUT):
     return n_ok, errs
 
 
-def push_test(cfg, c, email):
+def push_test(cfg, c, email, lang="sk"):
     """POST /api/push/test: skúšobná notifikácia na všetky zariadenia prihláseného používateľa (bez ohľadu na rolu a cooldown)."""
     if webpush is None:
-        return 503, {"error": "Upozornenia na zariadenia nie sú na serveri dostupné."}
+        return 503, {"error": tr("srv.notify.push_nedostupny", lang)}
     targets = push_targets(c, email=email)
     if not targets:
-        return 400, {"error": "Na tomto účte nie je zapnuté žiadne zariadenie."}
+        return 400, {"error": tr("srv.notify.ziadne_zariadenie", lang)}
     if is_dry(cfg):
         print("[DRY_RUN] skúšobný push na %d zariadení" % len(targets), flush=True)
         return 200, {"ok": True, "dry": True, "devices": len(targets), "sent": 0,
-                     "note": "Testovacie prostredie (DRY_RUN): nič sa neodoslalo."}
-    n, errs = push_deliver(cfg, c, targets, push_payload(cfg, "Kúrenie – skúška", "Skúšobné upozornenie: upozornenia na tomto zariadení fungujú.", "test"))
+                     "note": tr("srv.notify.dry_nic", lang)}
+    n, errs = push_deliver(cfg, c, targets, push_payload(cfg, tr("srv.notify.skuska_titul", lang), tr("srv.notify.skuska_text", lang), "test"))
     out = {"ok": n > 0, "devices": len(targets), "sent": n}
     if n == 0:
-        out["error"] = errs[0] if errs else "Odoslanie zlyhalo."
+        out["error"] = errs[0] if errs else tr("srv.notify.odoslanie_zlyhalo", lang)
     return 200, out
 
 
@@ -328,9 +330,10 @@ def target_changed(cfg, old, new, who):
     try:
         if new is None or (old is not None and abs(float(old) - float(new)) < 1e-9):
             return False, "bez zmeny"
-        who = str(who or "správca")[:120]
-        return event(cfg, "cielova_zmena", "Kúrenie – cieľová teplota",
-                     "Cieľová teplota zmenená na %s °C (%s)" % (("%.1f" % float(new)).replace(".", ","), who))
+        hl = i18n.home_lang(cfg)
+        who = str(who or tr("srv.notify.spravca", hl))[:120]
+        return event(cfg, "cielova_zmena", tr("srv.notify.cielova_titul", hl),
+                     tr("srv.notify.cielova_text", hl, v=i18n.dec(("%.1f" % float(new)).replace(".", ","), hl), who=who))
     except Exception as e:
         return False, ("%s: %s" % (type(e).__name__, e))[:300]
 
@@ -390,6 +393,16 @@ def send(cfg, title, message, kind, cooldown_s=0):
                 c.close()
             except Exception:
                 pass
+
+
+_ERR_KEYS = {"nenastavené": "nenastavene", "cooldown": "cooldown", "DRY_RUN (neodoslané)": "dry_run",
+             "predchádzajúci pokus zlyhal, skúsim neskôr": "predchadzajuci", "odoslanie zlyhalo": "zlyhalo", "bez zmeny": "bez_zmeny"}
+
+def err_text(err, lang="sk"):
+    """Preklad chybového kódu z send() pre zobrazenie na webe (neznáme texty sa vrátia bez zmeny)."""
+    if lang == "sk" or err not in _ERR_KEYS:
+        return err
+    return tr("srv.notify.err_" + _ERR_KEYS[err], lang)
 
 
 def status(cfg, c):

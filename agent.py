@@ -13,8 +13,21 @@ import profil
 from common import (P, REF_NAME, REF_ROOM, ROOM_NAMES, ROOMS, S, SETTINGS, TARGET_ROOMS, adb, balance, cfg_int, day_bounds, day_summary,
                     get_state, get_targets, hour_stats, is_dry, load_cfg, local_midnight, set_state, tcq)
 import abtest, contacts, dhw, interventions, notify, temps
+import i18n
+from i18n import tr
 
 UNDO_REASON = "vrátené používateľom"
+
+
+def lang_note(lang):
+    """Pokyn jazyka na koniec systémového promptu (samotné prompty ostávajú po slovensky; pokyn je tiež po slovensky)."""
+    return "\n\nOdpovedaj v jazyku: %s" % i18n.lang_name(lang)
+
+
+def with_lang(prompt, lang):
+    return prompt + lang_note(lang)
+
+
 UNDO_MAX_AGE_S = 72 * 3600
 ALERTS_KEY = "alerts"
 
@@ -281,25 +294,25 @@ def room_target_current(cfg):
     return None
 
 
-def parse_room_target(value):
+def parse_room_target(value, lang="sk"):
     """Číslo 20,0 až 24,5 v kroku 0,5, inak ValueError po slovensky."""
     if isinstance(value, bool):
-        raise ValueError("Neplatná teplota.")
+        raise ValueError(tr("srv.agent.neplatna_teplota", lang))
     try:
         x = float(str(value).strip().replace(",", ".")) if isinstance(value, str) else float(value)
     except (TypeError, ValueError):
-        raise ValueError("Neplatná teplota.")
+        raise ValueError(tr("srv.agent.neplatna_teplota", lang))
     if x != x or not (ROOM_TARGET_MIN - 1e-9 <= x <= ROOM_TARGET_MAX + 1e-9) or abs(x * 2 - round(x * 2)) > 1e-9:
-        raise ValueError("Cieľová teplota musí byť %s až %s °C v kroku 0,5." % (sk(ROOM_TARGET_MIN), sk(ROOM_TARGET_MAX)))
+        raise ValueError(tr("srv.agent.ciel_rozsah", lang, lo=i18n.dec(sk(ROOM_TARGET_MIN), lang), hi=i18n.dec(sk(ROOM_TARGET_MAX), lang)))
     return round(x * 2) / 2
 
 
-def set_room_target(cfg, c, value, who):
+def set_room_target(cfg, c, value, who, lang="sk"):
     """Nastaví cieľovú izbovú teplotu (jediná cesta: web správcu aj chat). V DRY_RUN sa do ESP nezapisuje.
     Zapíše riadok do actions aj runs. Vracia {"old","new","dry"}; ValueError = neplatný vstup, RuntimeError = zápis zlyhal."""
-    v = parse_room_target(value)
+    v = parse_room_target(value, lang)
     if not ROOM_TARGET_ENT:
-        raise RuntimeError("Zariadenie nemá v profile entitu cieľovej izbovej teploty.")
+        raise RuntimeError(tr("srv.agent.bez_entity", lang))
     old = room_target_current(cfg)
     now = int(time.time())
     dry = is_dry(cfg)
@@ -321,49 +334,47 @@ def set_room_target(cfg, c, value, who):
     if ok:
         c.execute("INSERT INTO runs(ts,mode,status,stav,summary,actions) VALUES(?,?,?,?,?,?)",
                   (now, get_state(c, "mode", "advise"), "info", None,
-                   "Cieľová izbová teplota zmenená cez web (%s): %s → %s °C%s" % (who, "?" if old is None else sk(old), sk(v),
-                                                                                  " (DRY_RUN, nezapísané)" if dry else ""), "[]"))
+                   tr("srv.agent.log_ciel", i18n.home_lang(cfg), who=who, old="?" if old is None else i18n.dec(sk(old), i18n.home_lang(cfg)), new=i18n.dec(sk(v), i18n.home_lang(cfg)),
+                      dry=tr("srv.agent.dry_nezapisane", i18n.home_lang(cfg)) if dry else ""), "[]"))
     c.commit()
     if not ok:
-        raise RuntimeError("Teplotu sa nepodarilo nastaviť: %s." % err)
+        raise RuntimeError(tr("srv.agent.nastavit_zlyhalo", lang, err=err))
     return {"old": old, "new": v, "dry": dry}
 
 
-def chat_room_target(cfg, c, want, email, now):
+def chat_room_target(cfg, c, want, email, now, lang="sk"):
     """Zmena cieľa z chatu bežného používateľa s mantinelmi. Vracia (vykonané, text pre používateľa)."""
+    n = lambda x, nd=1: i18n.dec(sk(x, nd), lang)
     try:
-        v = parse_room_target(want)
+        v = parse_room_target(want, lang)
     except ValueError:
         try:
             raw = float(want)
         except (TypeError, ValueError):
-            return False, "Zmenu teploty som nevykonal: nerozumiem požadovanej hodnote."
-        return False, "Zmenu teploty som nevykonal: povolený rozsah je %s až %s °C v kroku 0,5 (požadované %s)." % (
-            sk(ROOM_TARGET_MIN), sk(ROOM_TARGET_MAX), sk(raw, 2))
+            return False, tr("srv.agent.ch_nerozumiem", lang)
+        return False, tr("srv.agent.ch_rozsah", lang, lo=n(ROOM_TARGET_MIN), hi=n(ROOM_TARGET_MAX), raw=n(raw, 2))
     if abtest.active(c):
-        return False, "Zmenu teploty som nevykonal: práve prebieha porovnávací test, počas ktorého sa cieľ nemení. Požiadaj správcu."
+        return False, tr("srv.agent.ch_test", lang)
     cur = room_target_current(cfg)
     if cur is None:
-        return False, "Zmenu teploty som nevykonal: aktuálny cieľ teraz nepoznám. Skús to o chvíľu."
+        return False, tr("srv.agent.ch_nepoznam", lang)
     if abs(v - cur) < 1e-9:
-        return False, "Cieľová teplota už je %s °C, nič nemením." % sk(cur)
+        return False, tr("srv.agent.ch_uz", lang, v=n(cur))
     if abs(v - cur) > ROOM_TARGET_CHAT_STEP + 1e-9:
-        return False, "Zmenu teploty som nevykonal: naraz sa dá zmeniť najviac o %s °C (teraz je %s °C). Skús %s °C." % (
-            sk(ROOM_TARGET_CHAT_STEP), sk(cur), sk(cur + ROOM_TARGET_CHAT_STEP if v > cur else cur - ROOM_TARGET_CHAT_STEP))
+        return False, tr("srv.agent.ch_krok", lang, step=n(ROOM_TARGET_CHAT_STEP), cur=n(cur), try_=n(cur + ROOM_TARGET_CHAT_STEP if v > cur else cur - ROOM_TARGET_CHAT_STEP))
     try:
         last = float(get_state(c, "room_target_chat_ts", "0") or 0)
     except ValueError:
         last = 0
     if now - last < ROOM_TARGET_CHAT_GAP_S:
         wait = int((ROOM_TARGET_CHAT_GAP_S - (now - last)) // 60) + 1
-        return False, "Zmenu teploty som nevykonal: z chatu ju možno meniť najviac raz za 30 minút (skús o %d min)." % wait
+        return False, tr("srv.agent.ch_cas", lang, n=wait)
     try:
-        res = set_room_target(cfg, c, v, email)
+        res = set_room_target(cfg, c, v, email, lang)
     except (ValueError, RuntimeError) as e:
-        return False, "Zmenu teploty som nevykonal: %s" % e
+        return False, tr("srv.agent.ch_chyba", lang, err=e)
     set_state(c, "room_target_chat_ts", str(now))
-    return True, "Cieľová teplota (referenčná izba %s) je nastavená na %s °C (bolo %s °C)%s." % (
-        REF_NAME, sk(res["new"]), sk(res["old"]) if res["old"] is not None else "?", " [skúšobný režim, nezapísané]" if res["dry"] else "")
+    return True, tr("srv.agent.ch_ok", lang, ref=REF_NAME, new=n(res["new"]), old=n(res["old"]) if res["old"] is not None else "?", dry=tr("srv.agent.skusobny", lang) if res["dry"] else "")
 
 
 def user_context(cfg, c, now):
@@ -389,23 +400,24 @@ def user_context(cfg, c, now):
     return "\n".join(lines)
 
 
-def chat_reply(cfg, c, text, store_user=True, info=None, role="admin", email=None):
+def chat_reply(cfg, c, text, store_user=True, info=None, role="admin", email=None, lang=None):
     """Uloží správu majiteľa, vyžiada si odpoveď agenta (JSON: odpoved + voliteľný zasah) a uloží ju. Vracia (odpoveď, cena, chyba).
     Ak je zadaný slovník `info`, doplní do neho kľúč "intervention" (vytvorený zásah alebo None).
     role="user": správa bežného používateľa (e-mail) – model smie len žiadať zmenu cieľovej teploty (mantinely v chat_room_target)."""
     now = int(time.time())
+    lang = lang or i18n.home_lang(cfg)
     intervention = None
     if role == "user":
-        return _chat_reply_user(cfg, c, text, store_user, info, email or "používateľ", now)
+        return _chat_reply_user(cfg, c, text, store_user, info, email or "používateľ", now, lang)
     if store_user:
         c.execute("INSERT INTO messages(ts, role, text) VALUES(?,?,?)", (now, "user", text))
         c.commit()
     if not cfg["OPENROUTER_API_KEY"]:
-        reply, cost, err = "Zapísané. Bez kľúča OpenRouter ti neviem odpovedať, ale správu zohľadním, hneď ako bude kľúč nastavený.", None, None
+        reply, cost, err = tr("srv.agent.chat_bez_kluca", lang), None, None
     else:
         try:
             ctx, _meta = build_input(cfg, c, time.time())
-            raw, _i, _o, cost = call_llm(cfg, CHAT_SYSTEM, ctx + "\n\nNOVÁ SPRÁVA OD MAJITEĽA (odpovedz na ňu):\n" + text, 2500,
+            raw, _i, _o, cost = call_llm(cfg, with_lang(CHAT_SYSTEM, i18n.home_lang(cfg)), ctx + "\n\nNOVÁ SPRÁVA OD MAJITEĽA (odpovedz na ňu):\n" + text, 2500,
                                          as_json=True, validate=False)
             raw = raw.strip()
             try:
@@ -424,7 +436,7 @@ def chat_reply(cfg, c, text, store_user=True, info=None, role="admin", email=Non
                 raise RuntimeError("model vrátil prázdnu odpoveď")
         except Exception as e:
             err = str(e)[:300]
-            reply, cost = "Správu som si zapísal a zohľadním ju pri najbližšom behu. Odpovedať sa mi teraz nepodarilo (%s)." % err, None
+            reply, cost = tr("srv.agent.chat_chyba", lang, err=err), None
     c.execute("INSERT INTO messages(ts, role, text, cost) VALUES(?,?,?,?)", (int(time.time()), "agent", reply, cost))
     c.commit()
     if info is not None:
@@ -432,18 +444,18 @@ def chat_reply(cfg, c, text, store_user=True, info=None, role="admin", email=Non
     return reply, cost, err
 
 
-def _chat_reply_user(cfg, c, text, store_user, info, email, now):
+def _chat_reply_user(cfg, c, text, store_user, info, email, now, lang="sk"):
     """Chat bežného používateľa: správa sa uloží s autorom, odpoveď nesmie nič okrem žiadosti o cieľovú teplotu meniť."""
     if store_user:
         c.execute("INSERT INTO messages(ts, role, text, author) VALUES(?,?,?,?)", (now, "user", "[%s] %s" % (email, text), email))
         c.commit()
     cost, err, ciel = None, None, None
     if not cfg["OPENROUTER_API_KEY"]:
-        reply = "Správu som si zapísal. Bez kľúča OpenRouter ti neviem odpovedať ani vybaviť zmenu teploty; požiadaj správcu."
+        reply = tr("srv.agent.chatu_bez_kluca", lang)
     else:
         try:
             ctx = user_context(cfg, c, now)
-            raw, _i, _o, cost = call_llm(cfg, CHAT_SYSTEM_USER.replace("{email}", email.replace("{", "").replace("}", "")),
+            raw, _i, _o, cost = call_llm(cfg, with_lang(CHAT_SYSTEM_USER.replace("{email}", email.replace("{", "").replace("}", "")), i18n.home_lang(cfg)),
                                          ctx + "\n\nNOVÁ SPRÁVA OD POUŽÍVATEĽA (odpovedz na ňu):\n" + text, 1500, as_json=True, validate=False)
             raw = raw.strip()
             try:
@@ -459,13 +471,13 @@ def _chat_reply_user(cfg, c, text, store_user, info, email, now):
                 raise RuntimeError("model vrátil prázdnu odpoveď")
         except Exception as e:
             err = str(e)[:300]
-            reply, cost, ciel = "Správu som si zapísal. Odpovedať sa mi teraz nepodarilo (%s)." % err, None, None
+            reply, cost, ciel = tr("srv.agent.chatu_chyba", lang, err=err), None, None
     if ciel is not None and ciel != "":
         try:
-            done, note = chat_room_target(cfg, c, ciel, email, now)
+            done, note = chat_room_target(cfg, c, ciel, email, now, lang)
         except Exception as e:
             traceback.print_exc()
-            done, note = False, "Zmenu teploty som nevykonal: vnútorná chyba."
+            done, note = False, tr("srv.agent.vnutorna_chyba", lang)
         reply = (reply + "\n" + note) if done else note   # pri odmietnutí platí len vysvetlenie (odpoveď modelu by mohla sľubovať zmenu)
     c.execute("INSERT INTO messages(ts, role, text, cost) VALUES(?,?,?,?)", (int(time.time()), "agent", reply, cost))
     c.commit()
@@ -586,11 +598,11 @@ def learn(cfg, c):
             "", "POSLEDNÉ ANALÝZY Z DENNÍKA:",
             "\n".join("%s %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(t)), ti, (b or "")[:500]) for t, ti, b in notes) or "(žiadne)"]
             + temps_block(c, 21, today=False))
-        txt, _i, _o, rec["cost"] = call_llm(cfg, LEARN_SYSTEM, user, 5000)
+        txt, _i, _o, rec["cost"] = call_llm(cfg, with_lang(LEARN_SYSTEM, i18n.home_lang(cfg)), user, 5000)
         d = parse_json(txt)
         les = [str(x)[:500] for x in (d.get("poucenia") or []) if str(x).strip()][:12]
         rec["lessons"] = json.dumps(les, ensure_ascii=False)
-        rec["summary"] = (str(d.get("zhrnutie_dna") or "") + ("\nSledovať: " + str(d["sledovat"]) if d.get("sledovat") else ""))[:2000]
+        rec["summary"] = (str(d.get("zhrnutie_dna") or "") + ("\n" + tr("srv.agent.sledovat", i18n.home_lang(cfg), v=str(d["sledovat"])) if d.get("sledovat") else ""))[:2000]
         if not les:
             raise ValueError("model nevrátil žiadne poučenia")
     except Exception as e:
@@ -1005,9 +1017,9 @@ def log_rutina(cfg, c, mode, cur, hrs, checks, now):
     """Zapíše riadok `runs` pre beh bez volania modelu."""
     h = closed_hour(hrs, now) or {}
     ciel = cur.get(E_CIEL) if E_CIEL else None
-    summary = ("Bez zmien: %s %s °C (cieľ %s), vonku %s °C, ΔT %s °C, kompresor %s %% hodiny. Model nebolo treba volať."
-               % (REF_NAME.lower(), sk(h.get(REF_ROOM)), sk(ciel), sk(h.get("vonku")), sk(h.get("dt_beh")),
-                  "–" if h.get("beh") is None else h["beh"]))
+    summary = tr("srv.agent.rutina", i18n.home_lang(cfg), ref=REF_NAME.lower(), t=i18n.dec(sk(h.get(REF_ROOM)), i18n.home_lang(cfg)), ciel=i18n.dec(sk(ciel), i18n.home_lang(cfg)),
+                 out=i18n.dec(sk(h.get("vonku")), i18n.home_lang(cfg)), dt=i18n.dec(sk(h.get("dt_beh")), i18n.home_lang(cfg)),
+                 beh="–" if h.get("beh") is None else h["beh"])
     rec = {"ts": int(now), "mode": mode, "status": "rutina", "stav": "ok", "summary": summary, "advice": "", "model": "",
            "input": "\n".join(checks), "output": None, "actions": "[]", "error": None, "tok_in": None, "tok_out": None, "cost": 0.0}
     c.execute("INSERT INTO runs(ts,mode,status,stav,summary,advice,model,input,output,actions,error,tok_in,tok_out,cost) "
@@ -1030,7 +1042,7 @@ def run_once(cfg, c, mode, forced=False, reasons=None, pre=None):
         cur = meta["cur"]
         info = {}
         txt, rec["tok_in"], rec["tok_out"], rec["cost"] = call_llm(
-            cfg, SYSTEM.format(allowed=allowed_text(cur), targets=targets_text(c)), text, info=info)
+            cfg, with_lang(SYSTEM.format(allowed=allowed_text(cur), targets=targets_text(c)), i18n.home_lang(cfg)), text, info=info)
         rec["model"] = info.get("model") or rec["model"]
         rec["output"] = txt
         d = parse_json(txt)
@@ -1088,10 +1100,11 @@ def run_once(cfg, c, mode, forced=False, reasons=None, pre=None):
                 if res["vykonane"]:
                     try:
                         c.commit()
+                        hl = i18n.home_lang(cfg)
                         interventions.add(c, "agent", "krivka" if name in CURVE_ENTITIES else "nastavenie", None,
-                                          "Agent zmenil %s: %s → %s. Dôvod: %s" % (name, old, new, reason[:200]), ts=int(now))
-                        notify.event(cfg, "agent_zmena", "Kúrenie: agent zmenil nastavenie",
-                                     "Agent zmenil %s: %s → %s. Dôvod: %s" % (name, old, new, reason[:300]))
+                                          tr("srv.agent.zmenil", hl, name=name, old=old, new=new, reason=reason[:200]), ts=int(now))
+                        notify.event(cfg, "agent_zmena", tr("srv.agent.zmenil_t", hl),
+                                     tr("srv.agent.zmenil", hl, name=name, old=old, new=new, reason=reason[:300]))
                     except Exception:
                         traceback.print_exc()
             results.append(res)
@@ -1105,7 +1118,7 @@ def run_once(cfg, c, mode, forced=False, reasons=None, pre=None):
     c.commit()
     if rec["status"] == "ok" and rec["stav"] == "problem":
         try:
-            notify.event(cfg, "agent_problem", "Kúrenie: agent hlási problém", (rec["summary"] or "")[:500])
+            notify.event(cfg, "agent_problem", tr("srv.agent.problem_t", i18n.home_lang(cfg)), (rec["summary"] or "")[:500])
         except Exception:
             traceback.print_exc()
     return rec
@@ -1113,35 +1126,35 @@ def run_once(cfg, c, mode, forced=False, reasons=None, pre=None):
 
 # ---------------------------------------------------------------- vrátenie zmeny (SPEC bod 9)
 
-def undo(cfg, c, action_id):
+def undo(cfg, c, action_id, lang="sk"):
     """Vráti zmenu agenta. Vracia (ok, správa). Zapisuje cez esp_set_number (DRY_RUN sa rešpektuje)."""
     try:
         aid = int(action_id)
     except (TypeError, ValueError):
-        return False, "Neplatné číslo akcie."
+        return False, tr("srv.agent.u_cislo", lang)
     r = c.execute("SELECT rowid, ts, entity, old, new, reason, applied, coalesce(undone,0) FROM actions WHERE rowid=?", (aid,)).fetchone()
     if not r:
-        return False, "Akcia neexistuje."
+        return False, tr("srv.agent.u_neexistuje", lang)
     _id, ts, name, old, new, reason, applied, undone = r
     if not applied:
-        return False, "Akcia nebola vykonaná, nie je čo vracať."
+        return False, tr("srv.agent.u_nevykonana", lang)
     if undone:
-        return False, "Akcia už bola vrátená."
+        return False, tr("srv.agent.u_uz", lang)
     if reason == UNDO_REASON:
-        return False, "Vrátenie sa nedá vrátiť."
+        return False, tr("srv.agent.u_vratenie", lang)
     lim = ALLOWED.get(name)
     if not lim:
-        return False, "Túto entitu nie je dovolené meniť."
+        return False, tr("srv.agent.u_entita", lang)
     if time.time() - ts > UNDO_MAX_AGE_S:
-        return False, "Akcia je staršia ako 72 hodín."
+        return False, tr("srv.agent.u_stara", lang)
     if old is None or new is None or old < lim[0] - 1e-6 or old > lim[1] + 1e-6:
-        return False, "Pôvodná hodnota nie je známa alebo je mimo povoleného rozsahu."
+        return False, tr("srv.agent.u_povodna", lang)
     try:
         curv = num(esp_get(cfg, "number", name).get("value"))
     except Exception as e:
-        return False, "ESP neodpovedá: %s" % e
+        return False, tr("srv.agent.u_esp", lang, err=e)
     if curv is None or abs(curv - new) > 1e-6:
-        return False, "Hodnota sa medzitým zmenila (v ESP je %s, očakávaných %s)." % (curv, new)
+        return False, tr("srv.agent.u_zmenila", lang, cur=curv, exp=new)
     try:
         esp_set_number(cfg, name, "%g" % old)
         if is_dry(cfg):
@@ -1151,7 +1164,7 @@ def undo(cfg, c, action_id):
             back = num(esp_get(cfg, "number", name).get("value"))
             ok = back is not None and abs(back - old) < 1e-6
     except Exception as e:
-        return False, "Zápis do ESP zlyhal: %s" % e
+        return False, tr("srv.agent.u_zapis", lang, err=e)
     now = int(time.time())
     c.execute("INSERT INTO actions(ts,entity,old,new,reason,applied,result) VALUES(?,?,?,?,?,?,?)",
               (now, name, new, old, UNDO_REASON, 1 if ok else 0,
@@ -1163,8 +1176,8 @@ def undo(cfg, c, action_id):
         c.execute("UPDATE interventions SET status='zrusene' WHERE source='agent' AND ts=? AND status='caka'", (ts,))
     c.commit()
     if not ok:
-        return False, "Zápis nebol v ESP potvrdený."
-    return True, "Vrátené na %s." % old
+        return False, tr("srv.agent.u_nepotvrdeny", lang)
+    return True, tr("srv.agent.u_vratene", lang, old=old)
 
 
 # ---------------------------------------------------------------- týždenný súhrn (SPEC bod 8)
@@ -1221,7 +1234,7 @@ def weekly(cfg, c, now=None):
                           "", "ZMENY AGENTA ZA 7 DNÍ:", "\n".join(actl) or "(žiadne)",
                           "", "NÁKLADY NA MODEL ZA 7 DNÍ: %.3f USD" % cost,
                           "", "POUČENIA:", "\n".join("- " + x for x in les) or "(žiadne)"] + temps_block(c, 7, now))
-        txt, _i, _o, wcost = call_llm(cfg, WEEKLY_SYSTEM, user, 3000)
+        txt, _i, _o, wcost = call_llm(cfg, with_lang(WEEKLY_SYSTEM, i18n.home_lang(cfg)), user, 3000)
         d = parse_json(txt)
         suhrn = str(d.get("suhrn") or "").strip()
         if not suhrn:
@@ -1233,7 +1246,7 @@ def weekly(cfg, c, now=None):
         c.commit()
         set_state(c, "last_weekly", today)
         first2 = " ".join(re.split(r"(?<=[.!?])\s+", suhrn)[:2])
-        notify.event(cfg, "tyzden", "Kúrenie: týždenný súhrn", first2[:600])
+        notify.event(cfg, "tyzden", tr("srv.agent.tyzden_t", i18n.home_lang(cfg)), first2[:600])
         print(time.strftime("%F %T"), "týždenný súhrn uložený", flush=True)
         return True
     except Exception as e:
@@ -1328,6 +1341,7 @@ def watchdog_tick(cfg, c, wd, now=None):
     """Jedna kontrola strážcu (každú minútu z watchdog_loop). `wd` = slovník s pamäťou vlákna. Vracia zoznam poplachov."""
     now = int(now or time.time())
     alerts = {}
+    hl = i18n.home_lang(cfg)
 
     def safe(fn):
         try:
@@ -1345,12 +1359,12 @@ def watchdog_tick(cfg, c, wd, now=None):
         r = tcq(cfg, "SELECT v FROM meta WHERE k='last_sample'")
         age = now - int((r[0][0] if r else 0) or 0)
         if age > WD_COLLECTOR_STALE_S:
-            alerts["zberac"] = "Zberač dát neposiela nové údaje už %d min." % (age // 60)
-            ok, _e = notify_("zberac", "Kúrenie: zberač dát nefunguje", alerts["zberac"])
+            alerts["zberac"] = tr("srv.agent.zberac", hl, n=age // 60)
+            ok, _e = notify_("zberac", tr("srv.agent.zberac_t", hl), alerts["zberac"])
             if ok:
                 set_state(c, "wd_zberac_sent", "1")
         elif get_state(c, "wd_zberac_sent") == "1":
-            ok, e = notify_("zberac_ok", "Kúrenie: zberač dát opäť funguje", "Zberač dát opäť posiela údaje.")
+            ok, e = notify_("zberac_ok", tr("srv.agent.zberac_ok_t", hl), tr("srv.agent.zberac_ok", hl))
             if ok or e == "nenastavené":
                 set_state(c, "wd_zberac_sent", "0")
 
@@ -1364,12 +1378,12 @@ def watchdog_tick(cfg, c, wd, now=None):
         except Exception:
             wd["esp_fail"] = wd.get("esp_fail", 0) + 1
             if wd["esp_fail"] >= 3:
-                alerts["esp"] = "ESP neodpovedá (%d kontroly po sebe)." % wd["esp_fail"]
-                notify_("esp", "Kúrenie: ESP neodpovedá", alerts["esp"])
+                alerts["esp"] = tr("srv.agent.esp", hl, n=wd["esp_fail"])
+                notify_("esp", tr("srv.agent.esp_t", hl), alerts["esp"])
             return
         if code is not None and code != 0:
-            alerts["chyba_tc"] = "Chybový kód tepelného čerpadla: E%d%s." % (int(code), " (nízky prietok vody)" if int(code) == 911 else "")
-            notify_("chyba_tc", "Kúrenie: chyba tepelného čerpadla", alerts["chyba_tc"])
+            alerts["chyba_tc"] = tr("srv.agent.chyba_tc", hl, code=int(code), tail=tr("srv.agent.nizky_prietok", hl) if int(code) == 911 else "")
+            notify_("chyba_tc", tr("srv.agent.chyba_tc_t", hl), alerts["chyba_tc"])
         # dohrev kúrenia
         try:
             on = _esp_val(cfg, "binary_sensor", "Elektrický dohrev kúrenia (Backup heater)") is True
@@ -1382,16 +1396,16 @@ def watchdog_tick(cfg, c, wd, now=None):
                 since = now
             mins = (now - int(float(since))) // 60
             if now - int(float(since)) > WD_BACKUP_MAX_S:
-                alerts["dohrev"] = "Elektrický dohrev kúrenia beží už %d min." % mins
-                notify_("dohrev", "Kúrenie: beží elektrický dohrev", alerts["dohrev"])
+                alerts["dohrev"] = tr("srv.agent.dohrev", hl, n=mins)
+                notify_("dohrev", tr("srv.agent.dohrev_t", hl), alerts["dohrev"])
         elif get_state(c, "wd_backup_since"):
             set_state(c, "wd_backup_since", "")
 
     def chk_runs():
         rows = c.execute("SELECT status, error FROM runs WHERE status NOT IN ('info','rutina') ORDER BY ts DESC LIMIT 3").fetchall()
         if len(rows) == 3 and all(r[0] == "chyba" for r in rows):
-            alerts["agent_chyba"] = "Agent skončil chybou 3-krát po sebe: %s" % ((rows[0][1] or "")[:200])
-            notify_("agent_chyba", "Kúrenie: agent opakovane zlyháva", alerts["agent_chyba"])
+            alerts["agent_chyba"] = tr("srv.agent.agent_chyba", hl, err=(rows[0][1] or "")[:200])
+            notify_("agent_chyba", tr("srv.agent.agent_chyba_t", hl), alerts["agent_chyba"])
 
     def chk_credit():
         if not cfg.get("OPENROUTER_API_KEY"):
@@ -1406,17 +1420,16 @@ def watchdog_tick(cfg, c, wd, now=None):
         daily = spent / 7.0
         days = left / daily if daily > 0 else None
         if left < 0.10 or (days is not None and days < 7):
-            alerts["kredit"] = "Kredit OpenRouter je takmer vyčerpaný: zostáva %s $%s." % (
-                ("%.2f" % left).replace(".", ","), (", vystačí na ~%d dní" % int(days)) if days is not None else "")
-            notify_("kredit", "Kúrenie: dochádza kredit OpenRouter", alerts["kredit"])
+            alerts["kredit"] = tr("srv.agent.kredit", hl, left=i18n.dec(("%.2f" % left).replace(".", ","), hl), tail=tr("srv.agent.kredit_dni", hl, n=int(days)) if days is not None else "")
+            notify_("kredit", tr("srv.agent.kredit_t", hl), alerts["kredit"])
 
     def chk_ha():
         if not (cfg.get("HA_TOKEN") or "").strip():
             return
-        txt = contacts.ha_alert(c)
+        txt = contacts.ha_alert(c, hl)
         if txt:
             alerts["ha"] = txt
-            notify_("ha", "Kúrenie: Home Assistant neodpovedá", txt)
+            notify_("ha", tr("srv.agent.ha_t", hl), txt)
 
     safe(chk_collector)
     safe(chk_ha)

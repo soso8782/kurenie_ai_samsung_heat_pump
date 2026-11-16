@@ -20,6 +20,7 @@ Verejné API (ostatné moduly používajú LEN toto):
 Iba štandardná knižnica.
 """
 import copy, json, os, re
+from i18n import tr
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PROFILE_FILE = os.path.join(ROOT, "profil.json")
@@ -128,19 +129,19 @@ def _strlist(v):
     return [s.strip() for s in v if isinstance(s, str) and s.strip()]
 
 
-def validate(p):
+def validate(p, lang="sk"):
     """Doplní chýbajúce časti z default(), normalizuje typy a vráti (profil, chyby). Pri chybách je vrátený profil stále
     použiteľný (neplatné položky sú nahradené predvolenými), ale save() ho nezapíše."""
     d = default()
     err = []
     if not isinstance(p, dict):
-        return d, ["Profil musí byť JSON objekt."]
+        return d, [tr("srv.profil.json_objekt", lang)]
     out = copy.deepcopy(d)
     out["verzia"] = VERSION
 
     z = p.get("zariadenie") or {}
     if not isinstance(z, dict):
-        err.append("zariadenie: musí byť objekt.")
+        err.append(tr("srv.profil.zar_objekt", lang))
         z = {}
     oz = out["zariadenie"]
     for k in ("model", "nazov", "chladivo"):
@@ -150,27 +151,27 @@ def validate(p):
         if z["typ"] in TYPY_JEDNOTKY:
             oz["typ"] = z["typ"]
         else:
-            err.append("zariadenie.typ: povolené %s." % ", ".join(TYPY_JEDNOTKY))
+            err.append(tr("srv.profil.zar_typ", lang, v=", ".join(TYPY_JEDNOTKY)))
     if "kurenie" in z:
         if z["kurenie"] in TYPY_KURENIA:
             oz["kurenie"] = z["kurenie"]
         else:
-            err.append("zariadenie.kurenie: povolené %s." % ", ".join(TYPY_KURENIA))
+            err.append(tr("srv.profil.zar_kurenie", lang, v=", ".join(TYPY_KURENIA)))
     if "vykon_kw" in z:
         x = _num(z["vykon_kw"], 2, 30)
         if x is None:
-            err.append("zariadenie.vykon_kw: číslo 2–30.")
+            err.append(tr("srv.profil.zar_vykon", lang))
         else:
             oz["vykon_kw"] = x
     if "fazy" in z:
         if z["fazy"] in (1, 3, "1", "3"):
             oz["fazy"] = int(z["fazy"])
         else:
-            err.append("zariadenie.fazy: 1 alebo 3.")
+            err.append(tr("srv.profil.zar_fazy", lang))
     if "tuv" in z:
         oz["tuv"] = bool(z["tuv"])
     if oz["model"] and not re.fullmatch(r"[A-Za-z0-9_\-.]{1,40}", oz["model"]):
-        err.append("zariadenie.model: len písmená, číslice, - _ .")
+        err.append(tr("srv.profil.zar_model", lang))
 
     e = p.get("esp") or {}
     if isinstance(e, dict):
@@ -179,46 +180,46 @@ def validate(p):
             if src is None:
                 continue
             if not isinstance(src, dict):
-                err.append("esp.%s: musí byť objekt." % sec)
+                err.append(tr("srv.profil.esp_objekt", lang, sec=sec))
                 continue
             for k, v in src.items():
                 if k not in keys:
-                    err.append("esp.%s: neznámy kľúč %s." % (sec, k))
+                    err.append(tr("srv.profil.esp_kluc", lang, sec=sec, k=k))
                 elif v in (None, ""):
                     out["esp"][sec][k] = ""          # prázdne = entita nie je k dispozícii
                 elif isinstance(v, str) and len(v) <= 120:
                     out["esp"][sec][k] = v.strip()
                 else:
-                    err.append("esp.%s.%s: text do 120 znakov." % (sec, k))
+                    err.append(tr("srv.profil.esp_text", lang, sec=sec, k=k))
         if "rest_extra" in e:
             out["esp"]["rest_extra"] = _strlist(e["rest_extra"])[:30]
     else:
-        err.append("esp: musí byť objekt.")
+        err.append(tr("srv.profil.esp_obj", lang))
 
     if "izby" in p:
         rooms = p["izby"]
         if not isinstance(rooms, list) or not rooms:
-            err.append("izby: aspoň jedna izba.")
+            err.append(tr("srv.profil.izby_aspon", lang))
         else:
             seen, outr = set(), []
             for i, r in enumerate(rooms):
                 if not isinstance(r, dict):
-                    err.append("izby[%d]: musí byť objekt." % i)
+                    err.append(tr("srv.profil.izba_obj", lang, i=i))
                     continue
                 k = str(r.get("kluc") or "").strip()
                 if not KEY_RE.match(k) or k in RESERVED or k in seen:
-                    err.append("izby[%d].kluc: malé písmená bez diakritiky (a-z, 0-9, _), jedinečný, nie rezervovaný (%s)." % (i, k))
+                    err.append(tr("srv.profil.izba_kluc", lang, i=i, k=k))
                     continue
                 seen.add(k)
                 mn = r.get("min")
                 mnv = None if mn in (None, "") else _num(mn, *ABS_ROOM_TARGET)
                 if mn not in (None, "") and mnv is None:
-                    err.append("izby[%d].min: %g–%g °C alebo prázdne." % ((i,) + ABS_ROOM_TARGET))
+                    err.append(tr("srv.profil.izba_min", lang, i=i, lo="%g" % ABS_ROOM_TARGET[0], hi="%g" % ABS_ROOM_TARGET[1]))
                 outr.append({"kluc": k, "nazov": str(r.get("nazov") or k).strip()[:40], "esp": str(r.get("esp") or "").strip()[:120],
                              "referencna": bool(r.get("referencna")), "min": mnv, "ha": _strlist(r.get("ha"))[:5]})
             refs = [r for r in outr if r.get("referencna")]
             if outr and len(refs) != 1:
-                err.append("izby: práve jedna izba musí byť referenčná (podľa nej firmvér posúva krivku).")
+                err.append(tr("srv.profil.izby_referencna", lang))
                 if not refs:
                     outr[0]["referencna"] = True
                 else:
@@ -231,46 +232,46 @@ def validate(p):
         if sec in p:
             src = p[sec]
             if not isinstance(src, dict):
-                err.append("%s: musí byť objekt." % sec)
+                err.append(tr("srv.profil.sec_objekt", lang, sec=sec))
                 continue
             m = {}
             for k, v in src.items():
                 if not KEY_RE.match(str(k)):
-                    err.append("%s: neplatný kľúč %s." % (sec, k))
+                    err.append(tr("srv.profil.sec_kluc", lang, sec=sec, k=k))
                     continue
                 m[k] = _strlist(v)[:5]
             out[sec] = m
     room_set = {r["kluc"] for r in out["izby"]}
     for k in out["ine_teploty"]:
         if k in room_set or (k in RESERVED and k not in ("chodba", "kotolna")):
-            err.append("ine_teploty.%s: koliduje s izbou alebo rezervovaným názvom." % k)
+            err.append(tr("srv.profil.ine_koliduje", lang, k=k))
 
     mt = p.get("mantinely") or {}
     if not isinstance(mt, dict):
-        err.append("mantinely: musí byť objekt.")
+        err.append(tr("srv.profil.mant_obj", lang))
         mt = {}
     om = {"ciel_izby": list(d["mantinely"]["ciel_izby"])}
     for k, v in mt.items():
         if k == "ciel_izby":
             lo, hi = (_num(x, *ABS_ROOM_TARGET) for x in (v if isinstance(v, (list, tuple)) and len(v) == 2 else (None, None)))
             if lo is None or hi is None or lo >= hi:
-                err.append("mantinely.ciel_izby: [min, max] v rozsahu %g–%g °C." % ABS_ROOM_TARGET)
+                err.append(tr("srv.profil.mant_ciel", lang, lo="%g" % ABS_ROOM_TARGET[0], hi="%g" % ABS_ROOM_TARGET[1]))
             else:
                 om["ciel_izby"] = [lo, hi]
         elif k in ABS_LIMITS:
             ok = isinstance(v, (list, tuple)) and len(v) == 5
             vals = [_num(x) for x in v] if ok else []
             if not ok or None in vals:
-                err.append("mantinely.%s: [min, max, max_krok, hodín, zaokrúhlenie]." % k)
+                err.append(tr("srv.profil.mant_tvar", lang, k=k))
                 continue
             lo, hi, step, hours, rnd = vals
             alo, ahi = ABS_LIMITS[k]
             if lo < alo or hi > ahi or lo >= hi or step <= 0 or hours < 1 or rnd <= 0:
-                err.append("mantinely.%s: min/max v rozsahu %g–%g, min < max, krok a zaokrúhlenie > 0, hodín ≥ 1." % (k, alo, ahi))
+                err.append(tr("srv.profil.mant_rozsah", lang, k=k, lo="%g" % alo, hi="%g" % ahi))
                 continue
             om[k] = [lo, hi, step, int(hours), rnd]
         else:
-            err.append("mantinely: neznámy kľúč %s." % k)
+            err.append(tr("srv.profil.mant_kluc", lang, k=k))
     out["mantinely"] = om
 
     el = p.get("elektrina") or {}
@@ -306,21 +307,21 @@ def load(path=None):
     return copy.deepcopy(p)
 
 
-def errors(path=None):
+def errors(path=None, lang="sk"):
     """Chyby uloženého profilu (pre web); chýbajúci súbor = žiadne chyby."""
     path = path or PROFILE_FILE
     if not os.path.exists(path):
         return []
     try:
         with open(path, encoding="utf-8") as f:
-            return validate(json.load(f))[1]
+            return validate(json.load(f), lang)[1]
     except (OSError, ValueError) as ex:
-        return ["profil.json sa nedá prečítať: %s" % ex]
+        return [tr("srv.profil.necitat", lang, err=ex)]
 
 
-def save(p, path=None):
+def save(p, path=None, lang="sk"):
     path = path or PROFILE_FILE
-    norm, err = validate(p)
+    norm, err = validate(p, lang)
     if err:
         return err
     tmp = path + ".tmp"

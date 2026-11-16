@@ -8,7 +8,9 @@ takže zmena kalibračného koeficientu ani polnoc ho nikdy neznížia. Vypnutie
 import datetime as _dt, json, socket, threading, time, traceback
 
 import contacts_mqtt as cm
+import i18n
 import stats
+from i18n import tr
 from common import adb, get_state, load_cfg, set_state
 
 PERIOD = 60                 # s medzi odoslaniami
@@ -104,12 +106,15 @@ def build_publish(topic, payload, retain=False):
     return bytes([0x30 | (1 if retain else 0)]) + cm._enc_len(len(body)) + body
 
 
-def discovery():
-    """Zoznam (topic, JSON) discovery správ pre všetky senzory."""
+def discovery(lang="sk"):
+    """Zoznam (topic, JSON) discovery správ pre všetky senzory. Názvy v jazyku domácnosti; unique_id sa nemení."""
     out = []
+    device = DEVICE if lang == "sk" else dict(DEVICE, name=tr("srv.ha_pub.zariadenie", lang), model=tr("srv.ha_pub.model", lang))
     for key, name, unit, dc, sc, icon, dec in SENSORS:
+        if lang != "sk":
+            name = tr("srv.ha_pub.n_" + key, lang)
         d = {"name": name, "unique_id": "kurenie_tc_" + key, "object_id": "kurenie_tc_" + key, "state_topic": STATE_TOPIC,
-             "value_template": "{{ value_json.%s }}" % key, "device": DEVICE, "expire_after": EXPIRE_S,
+             "value_template": "{{ value_json.%s }}" % key, "device": device, "expire_after": EXPIRE_S,
              "suggested_display_precision": dec}
         if unit:
             d["unit_of_measurement"] = unit
@@ -195,7 +200,7 @@ def tick(cfg, mem, now=None):
         p.setdefault(key, mem["per"].get(key))
     msgs = []
     if now - mem.get("disc", 0) >= DISC_EVERY:
-        msgs += discovery()
+        msgs += discovery(i18n.home_lang(cfg))
     msgs.append((STATE_TOPIC, json.dumps(p)))
     send(cfg, msgs)
     if len(msgs) > 1:

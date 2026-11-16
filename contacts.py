@@ -5,10 +5,13 @@ Iba ČÍTA z Home Assistanta (POST /api/template s dlhodobým tokenom). Do ESP a
 Slučka `contacts_loop` beží ako daemon vlákno v procese agenta. Iba štandardná knižnica.
 """
 import json, time, traceback, unicodedata, urllib.error, urllib.request
+import ha_auth
 from datetime import datetime, timezone
 import profil
 from common import ROOMS, ROOM_NAMES, S, adb, get_state, load_cfg, set_state, tcq
 import notify
+import i18n
+from i18n import tr
 
 DEVICE_CLASSES = ("door", "window", "opening", "garage_door")
 POLL_S = 20
@@ -142,57 +145,58 @@ def group_by_id(c, gid):
     return dict(zip(GCOLS, r)) if r else None
 
 
-def _valid_notify_min(v, what="Čas upozornenia"):
+def _valid_notify_min(v, what=None, lang="sk"):
+    what = what or tr("srv.contacts.cas_upozornenia", lang)
     if v in (None, ""):
         return None
     if isinstance(v, bool) or (isinstance(v, float) and v != int(v)):
-        raise ValueError("%s musí byť celé číslo minút od 1 do 240." % what)
+        raise ValueError(tr("srv.contacts.min_1_240", lang, what=what))
     try:
         n = int(str(v).strip()) if not isinstance(v, (int, float)) else int(v)
     except ValueError:
-        raise ValueError("%s musí byť celé číslo minút od 1 do 240." % what)
+        raise ValueError(tr("srv.contacts.min_1_240", lang, what=what))
     if not 1 <= n <= 240:
-        raise ValueError("%s musí byť od 1 do 240 minút." % what)
+        raise ValueError(tr("srv.contacts.od_1_240", lang, what=what))
     return n
 
 
-def group_save(c, name, room=None, notify_min_=None, gid=None):
+def group_save(c, name, room=None, notify_min_=None, gid=None, lang="sk"):
     """Nová skupina (gid None) alebo úprava. Vracia id. Pri neplatnom vstupe vyhodí ValueError so slovenským textom."""
     ensure(c)
     name = str(name or "").strip()
     if not name or len(name) > 40:
-        raise ValueError("Názov skupiny musí mať 1 až 40 znakov.")
+        raise ValueError(tr("srv.contacts.nazov_skupiny", lang))
     room = room or None
     if room is not None and room not in ROOMS:
-        raise ValueError("Neplatná izba.")
-    nm = _valid_notify_min(notify_min_)
+        raise ValueError(tr("srv.contacts.neplatna_izba", lang))
+    nm = _valid_notify_min(notify_min_, lang=lang)
     dup = c.execute("SELECT id FROM contact_groups WHERE lower(name)=lower(?)", (name,)).fetchall()
     if gid is None:
         if dup:
-            raise ValueError("Skupina s týmto názvom už existuje.")
+            raise ValueError(tr("srv.contacts.skupina_existuje", lang))
         cur = c.execute("INSERT INTO contact_groups(name, room, notify_min, sort) VALUES(?,?,?,(SELECT coalesce(max(sort),0)+1 FROM contact_groups))",
                         (name, room, nm))
         c.commit()
         return cur.lastrowid
     old = group_by_id(c, gid)
     if not old:
-        raise ValueError("Skupina neexistuje.")
+        raise ValueError(tr("srv.contacts.skupina_neexistuje", lang))
     if any(r[0] != gid for r in dup):
-        raise ValueError("Skupina s týmto názvom už existuje.")
+        raise ValueError(tr("srv.contacts.skupina_existuje", lang))
     if gid == other_id(c) and name != old["name"]:
-        raise ValueError("Skupinu „%s“ nemožno premenovať." % old["name"])
+        raise ValueError(tr("srv.contacts.premenovat", lang, name=old["name"]))
     c.execute("UPDATE contact_groups SET name=?, room=?, notify_min=? WHERE id=?", (name, room, nm, gid))
     c.commit()
     return gid
 
 
-def group_delete(c, gid):
+def group_delete(c, gid, lang="sk"):
     """Zmaže skupinu, senzory presunie do „Ostatné“. „Ostatné“ sa zmazať nedá (ValueError)."""
     oid = ensure(c)
     if not group_by_id(c, gid):
-        raise ValueError("Skupina neexistuje.")
+        raise ValueError(tr("srv.contacts.skupina_neexistuje", lang))
     if gid == oid:
-        raise ValueError("Skupinu „%s“ nemožno zmazať." % OTHER_NAME)
+        raise ValueError(tr("srv.contacts.zmazat", lang, name=OTHER_NAME))
     c.execute("UPDATE contacts SET group_id=? WHERE group_id=?", (oid, gid))
     c.execute("DELETE FROM contact_groups WHERE id=?", (gid,))
     c.commit()
@@ -245,33 +249,37 @@ def norm_state(s):
     return "on" if s == "on" else ("off" if s == "off" else "unavailable")
 
 
-def fetch(cfg, timeout=10):
+def fetch(cfg, timeout=10, force=False, lang=None):
     """Zoznam senzorov z HA: [{"id","name","dc","state","since","area"}]. Pri chybe vyhodí RuntimeError so slovenským textom
     (token sa v texte nikdy nevyskytuje)."""
+    lang = lang or i18n.home_lang(cfg)
     url, token = ha_conf(cfg)
     if not url or not token:
-        raise RuntimeError("Home Assistant nie je nastavený (chýba adresa alebo token).")
+        raise RuntimeError(tr("srv.contacts.ha_nenastaveny", lang))
+    ha_auth.check(url, token, force, lang)
     req = urllib.request.Request(url + "/api/template", data=json.dumps({"template": TEMPLATE}).encode("utf-8"), method="POST",
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read(4_000_000).decode("utf-8", "replace")
+        ha_auth.ok(url, token)
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            raise RuntimeError("Home Assistant odmietol token (HTTP %d). Skontroluj dlhodobý prístupový token." % e.code)
+            ha_auth.failed(url, token)
+            raise RuntimeError(ha_auth.message(e.code, lang))
         if e.code == 404:
-            raise RuntimeError("Na tejto adrese nie je API Home Assistanta (HTTP 404). Skontroluj adresu.")
-        raise RuntimeError("Home Assistant odpovedal chybou HTTP %d." % e.code)
+            raise RuntimeError(tr("srv.contacts.ha_404", lang))
+        raise RuntimeError(tr("srv.contacts.ha_http", lang, code=e.code))
     except urllib.error.URLError as e:
-        raise RuntimeError("Spojenie s Home Assistantom zlyhalo: %s" % str(getattr(e, "reason", e))[:150])
+        raise RuntimeError(tr("srv.contacts.ha_spojenie", lang, err=str(getattr(e, "reason", e))[:150]))
     except Exception as e:
-        raise RuntimeError("Spojenie s Home Assistantom zlyhalo: %s" % (type(e).__name__ + " " + str(e))[:150])
+        raise RuntimeError(tr("srv.contacts.ha_spojenie", lang, err=(type(e).__name__ + " " + str(e))[:150]))
     try:
         data = json.loads(raw.strip())
     except ValueError:
-        raise RuntimeError("Home Assistant nevrátil platný JSON (šablóna sa nevyhodnotila).")
+        raise RuntimeError(tr("srv.contacts.ha_json", lang))
     if not isinstance(data, list):
-        raise RuntimeError("Home Assistant vrátil neočakávaný tvar odpovede.")
+        raise RuntimeError(tr("srv.contacts.ha_tvar", lang))
     out = []
     for d in data:
         if isinstance(d, dict) and isinstance(d.get("id"), str) and d["id"].startswith("binary_sensor."):
@@ -391,16 +399,23 @@ def poll(cfg, c, now=None):
         return {"ok": False, "count": 0, "error": err}
 
 
-def test(cfg):
-    """Pre web (/api/ha_test): len prečíta zoznam, nič nezapisuje. Vracia {"ok","count","error"}."""
+def test(cfg, url=None, token=None, lang="sk"):
+    """Pre web (/api/ha_test): len prečíta zoznam, nič nezapisuje. Vracia {"ok","count","error"}. Voliteľne otestuje
+    ešte neuloženú adresu/token (url, token); ručný test obchádza ochranu pred opakovaním (ha_auth)."""
     try:
-        items = fetch(cfg)
+        if url or token:
+            cfg = dict(cfg)
+            if url:
+                cfg["HA_URL"] = url
+            if token:
+                cfg["HA_TOKEN"] = token
+        items = fetch(cfg, force=True, lang=lang)
         return {"ok": True, "count": len(items), "error": None}
     except Exception as e:
         return {"ok": False, "count": 0, "error": str(e)[:300]}
 
 
-def ha_status(cfg, c):
+def ha_status(cfg, c, lang="sk"):
     url, token = ha_conf(cfg)
     try:
         fails = int(get_state(c, "ha_fails", "0") or 0)
@@ -418,12 +433,12 @@ def ha_status(cfg, c):
     ok = bool(configured and last_ok and fails == 0 and time.time() - last_ok < 120)
     err = (get_state(c, "ha_error", "") or None) if configured and fails else None
     if configured and not ok and not err:
-        err = "Čakám na prvé čítanie z Home Assistanta." if not last_ok else "Údaje z Home Assistanta sú staré (agent ho dlhšie nečítal)."
+        err = tr("srv.contacts.cakam", lang) if not last_ok else tr("srv.contacts.stare", lang)
     return {"configured": configured, "ok": ok, "last_ok": last_ok, "count": count, "error": err,
             "token_hint": ("…" + token[-4:]) if len(token) > 12 else "", "url": url}
 
 
-def ha_alert(c):
+def ha_alert(c, lang="sk"):
     """Text poplachu `ha` (po 3 neúspešných čítaniach po sebe) alebo None."""
     try:
         fails = int(get_state(c, "ha_fails", "0") or 0)
@@ -431,7 +446,7 @@ def ha_alert(c):
         return None
     if fails < FAILS_ALERT:
         return None
-    return "Home Assistant neodpovedá (%d pokusy po sebe), okná a dvere sa teraz nesledujú. %s" % (fails, get_state(c, "ha_error", "") or "")
+    return tr("srv.contacts.ha_alert", lang, n=fails, err=get_state(c, "ha_error", "") or "")
 
 
 # ---------------------------------------------------------------- zoznamy a úpravy
@@ -470,68 +485,68 @@ def tree(c, now=None):
     return [byg[g["id"]] for g in gs], ungrouped
 
 
-def update_contact(c, entity_id, alias=_UNSET, group_id=_UNSET, enabled=_UNSET, note=_UNSET):
+def update_contact(c, entity_id, alias=_UNSET, group_id=_UNSET, enabled=_UNSET, note=_UNSET, lang="sk"):
     """Úprava senzora. Neplatný vstup = ValueError so slovenským textom."""
     ensure(c)
     if not c.execute("SELECT 1 FROM contacts WHERE entity_id=?", (entity_id,)).fetchone():
-        raise ValueError("Neznámy senzor.")
+        raise ValueError(tr("srv.contacts.neznamy_senzor", lang))
     sets, args = [], []
     if alias is not _UNSET:
         if alias is not None and not isinstance(alias, str):
-            raise ValueError("Meno musí byť text.")
+            raise ValueError(tr("srv.contacts.meno_text", lang))
         a = (alias or "").strip()
         if len(a) > 60:
-            raise ValueError("Meno môže mať najviac 60 znakov.")
+            raise ValueError(tr("srv.contacts.meno_60", lang))
         sets.append("alias=?"); args.append(a or None)
     if group_id is not _UNSET:
         if group_id is None:
             group_id = other_id(c)
         if isinstance(group_id, bool) or not isinstance(group_id, int) or not group_by_id(c, group_id):
-            raise ValueError("Neplatná skupina.")
+            raise ValueError(tr("srv.contacts.neplatna_skupina", lang))
         sets.append("group_id=?"); args.append(group_id)
     if enabled is not _UNSET:
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
         elif not isinstance(enabled, (bool, int)):
-            raise ValueError("Neplatná hodnota zapnutia.")
+            raise ValueError(tr("srv.contacts.neplatne_zapnutie", lang))
         sets.append("enabled=?"); args.append(1 if enabled else 0)
     if note is not _UNSET:
         if note is not None and not isinstance(note, str):
-            raise ValueError("Poznámka musí byť text.")
+            raise ValueError(tr("srv.contacts.poznamka_text", lang))
         n = (note or "").strip()
         if len(n) > 200:
-            raise ValueError("Poznámka môže mať najviac 200 znakov.")
+            raise ValueError(tr("srv.contacts.poznamka_200", lang))
         sets.append("note=?"); args.append(n or None)
     if not sets:
-        raise ValueError("Nič na uloženie.")
+        raise ValueError(tr("srv.contacts.nic_na_ulozenie", lang))
     c.execute("UPDATE contacts SET %s WHERE entity_id=?" % ", ".join(sets), (*args, entity_id))
     c.commit()
 
 
-def save_settings(c, body):
+def save_settings(c, body, lang="sk"):
     """Sezóna, čas upozornenia, pripomienky. Vracia text zmeny pre záznam; neplatný vstup = ValueError."""
     upd, what = {}, []
     if body.get("season") is not None:
         if body["season"] not in SEASONS:
-            raise ValueError("Sezóna musí byť „zima“ alebo „leto“.")
+            raise ValueError(tr("srv.contacts.sezona", lang))
         upd["season"] = body["season"]
-        what.append("sezóna: " + body["season"])
-    for key, sk_, lo, text in (("notify_min", "window_notify_min", 1, "Čas upozornenia"), ("repeat_min", "window_repeat_min", 0, "Pripomienka")):
+        what.append(tr("srv.contacts.log_sezona", lang, v=body["season"]))
+    for key, sk_, lo, text in (("notify_min", "window_notify_min", 1, tr("srv.contacts.cas_upozornenia", lang)), ("repeat_min", "window_repeat_min", 0, tr("srv.contacts.pripomienka", lang))):
         if body.get(key) is None:
             continue
         v = body[key]
         if isinstance(v, bool) or (isinstance(v, float) and v != int(v)):
-            raise ValueError("%s musí byť celé číslo minút." % text)
+            raise ValueError(tr("srv.contacts.min_cele", lang, what=text))
         try:
             n = int(str(v).strip()) if isinstance(v, str) else int(v)
         except (TypeError, ValueError):
-            raise ValueError("%s musí byť celé číslo minút." % text)
+            raise ValueError(tr("srv.contacts.min_cele", lang, what=text))
         if not lo <= n <= 240:
-            raise ValueError("%s musí byť od %d do 240 minút." % (text, lo))
+            raise ValueError(tr("srv.contacts.min_od_do", lang, what=text, lo=lo))
         upd[sk_] = n
         what.append("%s %d min" % (text.lower(), n))
     if not upd:
-        raise ValueError("Nič na uloženie.")
+        raise ValueError(tr("srv.contacts.nic_na_ulozenie", lang))
     ensure(c)
     for k, v in upd.items():
         set_state(c, k, v)
@@ -766,7 +781,8 @@ def check_notifications(cfg, c, now=None):
     gthr = {g["id"]: g["notify_min"] for g in groups(c)}
     sent, changed = 0, False
     temp = _outside_temp(cfg)
-    ttxt = (" Vonku je %s °C." % sk(temp)) if temp is not None else ""
+    hl = i18n.home_lang(cfg)
+    ttxt = (" " + tr("srv.contacts.vonku_je", hl, v=i18n.dec(sk(temp), hl))) if temp is not None else ""
     rows = {r[0]: r for r in c.execute("SELECT entity_id, alias, ha_name, group_id, state, since, enabled FROM contacts")}
     gname = {g["id"]: g["name"] for g in groups(c)}
     oid = other_id(c)
@@ -785,11 +801,11 @@ def check_notifications(cfg, c, now=None):
         if not same or (not m.get("ok") and now - m.get("sent", 0) >= RETRY_FAILED_S):
             if not same and m:
                 m = None
-            ok = _send(cfg, "Kúrenie: otvorené okno", "Otvorené okno: %s – %s už %d min.%s" % (gn, lab, mins, ttxt))
+            ok = _send(cfg, tr("srv.contacts.okno_otvorene_t", hl), tr("srv.contacts.okno_otvorene", hl, g=gn, lab=lab, n=mins, t=ttxt))
             mem[eid] = {"since": since, "sent": now, "ok": ok, "n": (m.get("n", 0) if m else 0) + 1}
             changed, sent = True, sent + 1
         elif m.get("ok") and rep > 0 and now - m.get("sent", 0) >= rep * 60:
-            ok = _send(cfg, "Kúrenie: okno stále otvorené", "Otvorené okno: %s – %s už %d min.%s" % (gn, lab, mins, ttxt))
+            ok = _send(cfg, tr("srv.contacts.okno_stale_t", hl), tr("srv.contacts.okno_otvorene", hl, g=gn, lab=lab, n=mins, t=ttxt))
             m["sent"], m["ok"], m["n"] = now, ok or m.get("ok"), m.get("n", 1) + 1
             changed, sent = True, sent + 1
     # 2) zatvorené (alebo vypnuté / zmazané) senzory, o ktorých už odišlo upozornenie
@@ -805,7 +821,7 @@ def check_notifications(cfg, c, now=None):
             lab = (r[1] or "").strip() or r[2] or eid
             closed_at = r[5] if r[5] and r[5] >= m.get("since", 0) else now
             mins = max(1, int(round((closed_at - m["since"]) / 60.0)))
-            _send(cfg, "Kúrenie: okno zatvorené", "Zatvorené: %s po %d min." % (lab, mins))
+            _send(cfg, tr("srv.contacts.okno_zatvorene_t", hl), tr("srv.contacts.okno_zatvorene", hl, lab=lab, n=mins))
             sent += 1
         del mem[eid]
         changed = True

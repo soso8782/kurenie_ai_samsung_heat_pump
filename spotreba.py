@@ -9,6 +9,7 @@ import datetime as _dt, os, time
 
 import ha_cost
 import stats
+from i18n import tr
 
 MAX_DNI = 400
 MIN_HODIN_CERPADLO = 20      # ostatné = dom − čerpadlo len ak má čerpadlo aspoň toľko hodín za deň
@@ -65,19 +66,19 @@ def _month_key(d):
     return "%04d-%02d" % (d.year, d.month)
 
 
-def report(cfg, od, do, now=None):
+def report(cfg, od, do, now=None, lang="sk"):
     """Spotreba po dňoch za obdobie od–do (YYYY-MM-DD vrátane, max MAX_DNI dní; None = predvolené: od začiatku fakturačného
     obdobia po dnes). Neplatný vstup vyhodí ValueError so slovenským textom."""
     import ha_pub
     now = int(now or time.time())
     bs = _dt.date.fromtimestamp(ha_pub.billing_start(cfg, now))
-    d0 = stats._pdate(od) if od else bs
-    d1 = stats._pdate(do) if do else _dt.date.fromtimestamp(now)
+    d0 = stats._pdate(od, lang) if od else bs
+    d1 = stats._pdate(do, lang) if do else _dt.date.fromtimestamp(now)
     if d1 < d0:
-        raise ValueError("Koniec obdobia je pred začiatkom.")
+        raise ValueError(tr("srv.spotreba.koniec_pred", lang))
     n = (d1 - d0).days + 1
     if n > MAX_DNI:
-        raise ValueError("Obdobie je príliš dlhé (%d dní, najviac %d)." % (n, MAX_DNI))
+        raise ValueError(tr("srv.spotreba.dlhe", lang, n=n, max=MAX_DNI))
     a = stats._midnight(d0)
     b = stats._midnight(d1 + _dt.timedelta(days=1))
     st = _hourly(cfg, a, b)

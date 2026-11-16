@@ -5,6 +5,7 @@ import bisect, datetime as _dt, math, sqlite3, time
 
 import profil
 import stats
+from i18n import tr
 
 KROKY = (1, 2, 3, 5)
 MIN_HODIN = 3
@@ -15,6 +16,12 @@ VODA = ["tw2", "tw1", "wl"]
 NAZVY = dict(profil.room_names(P), chodba="Chodba", kotolna="Kotolňa", tw2="Voda výstup", tw1="Spiatočka", wl="Cieľ krivky")
 for _k in IZBY:
     NAZVY.setdefault(_k, _k.replace("_", " ").capitalize())
+
+
+def _nazov(c, lang="sk"):
+    if c in ("chodba", "kotolna", "tw2", "tw1", "wl") and lang != "sk":
+        return tr("srv.vonku.n_" + c, lang)
+    return NAZVY[c]
 
 
 def _hours(cfg, a, b):
@@ -64,21 +71,21 @@ def _stat(vals):
             "min_ts": mn[0], "max_ts": mx[0]}
 
 
-def report(cfg, od=None, do=None, krok=2, now=None):
+def report(cfg, od=None, do=None, krok=2, now=None, lang="sk"):
     """Pásma vonkajšej teploty (krok °C) s min/avg/max izieb a vody. od/do = 'YYYY-MM-DD' vrátane; None = od najstaršieho záznamu
     po dnes. Neplatný vstup vyhodí ValueError so slovenským textom."""
     try:
         krok = int(krok)
     except (TypeError, ValueError):
-        raise ValueError("Krok musí byť 1, 2, 3 alebo 5 °C.")
+        raise ValueError(tr("srv.vonku.krok_1235", lang))
     if krok not in KROKY:
-        raise ValueError("Krok musí byť 1, 2, 3 alebo 5 °C.")
+        raise ValueError(tr("srv.vonku.krok_1235", lang))
     now = int(now or time.time())
     today = _dt.date.fromtimestamp(now)
-    d0 = stats._pdate(od) if od else None
-    d1 = stats._pdate(do) if do else today
+    d0 = stats._pdate(od, lang) if od else None
+    d1 = stats._pdate(do, lang) if do else today
     if d0 is not None and d1 < d0:
-        raise ValueError("Koniec obdobia je pred začiatkom.")
+        raise ValueError(tr("srv.vonku.koniec_pred", lang))
     if d0 is None:
         try:
             con = stats._ro(stats._db_path(cfg), stats._timeout(cfg))
@@ -116,8 +123,8 @@ def report(cfg, od=None, do=None, krok=2, now=None):
         p["beh_pct"] = int(round(sum(bm) / len(bm) / 60.0 * 100)) if len(bm) >= MIN_HODIN else None
         pasma.append(p)
 
-    stlpce = [{"key": c, "name": NAZVY[c], "skupina": "izba"} for c in IZBY if c in used]
-    stlpce += [{"key": c, "name": NAZVY[c], "skupina": "voda"} for c in VODA if c in used]
+    stlpce = [{"key": c, "name": _nazov(c, lang), "skupina": "izba"} for c in IZBY if c in used]
+    stlpce += [{"key": c, "name": _nazov(c, lang), "skupina": "voda"} for c in VODA if c in used]
     return {"od": d0.isoformat(), "do": d1.isoformat(), "krok": krok, "pasma": pasma, "stlpce": stlpce,
             "hodin_spolu": sum(p["hodin"] for p in pasma),
             "prvy_den": stats._dstr(hrs[0][0]) if hrs else None,
@@ -200,23 +207,23 @@ def _kurenie_prazdny(d0, d1, krok):
             "krivka_nastavenie": {k: None for k, _ in NAST}, "zmeny": [], "prva_vzorka": None, "minut_spolu": 0}
 
 
-def kurenie(cfg, od=None, do=None, krok=1, now=None):
+def kurenie(cfg, od=None, do=None, krok=1, now=None, lang="sk"):
     """Pásma vonkajšej teploty s teplotou vody do radiátorov v minútach skutočného kúrenia (SPEC_akokuri.md).
     Zdroj: tc.db (minútové vzorky + udalosti), otvára sa len na čítanie. Neplatný vstup = ValueError po slovensky."""
     try:
         krok = int(krok)
     except (TypeError, ValueError):
-        raise ValueError("Krok musí byť 1, 2 alebo 5 °C.")
+        raise ValueError(tr("srv.vonku.krok_125", lang))
     if krok not in (1, 2, 5):
-        raise ValueError("Krok musí byť 1, 2 alebo 5 °C.")
+        raise ValueError(tr("srv.vonku.krok_125", lang))
     now = int(now or time.time())
     today = _dt.date.fromtimestamp(now)
-    d0 = stats._pdate(od) if od else None
-    d1 = stats._pdate(do) if do else today
+    d0 = stats._pdate(od, lang) if od else None
+    d1 = stats._pdate(do, lang) if do else today
     if d0 is not None and d1 < d0:
-        raise ValueError("Koniec obdobia je pred začiatkom.")
+        raise ValueError(tr("srv.vonku.koniec_pred", lang))
     if d0 is not None and (d1 - d0).days + 1 > MAX_DNI:
-        raise ValueError("Obdobie je najviac %d dní." % MAX_DNI)
+        raise ValueError(tr("srv.vonku.dni", lang, max=MAX_DNI))
     try:
         tc = stats._tc(cfg)
     except Exception:

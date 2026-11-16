@@ -339,9 +339,9 @@ async function loadMeta() {
 
 /* ---------- export ---------- */
 function exportUrl() {
-  if (S.view === "den") return "api/stats/export?" + q({kind: "day", d: S.day});
-  if (S.view === "porovnanie") return "api/stats/export?" + q({kind: "compare", dates: S.cmp.join(",")});
-  if (S.view === "obdobie") { const r = rngParams(); return r.ok ? "api/stats/export?" + q({kind: "range", from: r.from, to: r.to, group: S.rngGroup}) : ""; }
+  if (S.view === "den") return "api/stats/export?" + q({kind: "day", d: S.day, lang: window.LANG});
+  if (S.view === "porovnanie") return "api/stats/export?" + q({kind: "compare", dates: S.cmp.join(","), lang: window.LANG});
+  if (S.view === "obdobie") { const r = rngParams(); return r.ok ? "api/stats/export?" + q({kind: "range", from: r.from, to: r.to, group: S.rngGroup, lang: window.LANG}) : ""; }
   return "";
 }
 function updateExport() {

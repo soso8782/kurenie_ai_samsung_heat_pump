@@ -16,6 +16,7 @@ DEFAULTS = {
     "LLM_MAX_GAP_H": "4",
     "RETENTION_FULL_DAYS": "60",
     "NOTIFY_URL": "",
+    "UI_LANG": "sk",             # jazyk upozornení, agenta a HA senzorov (sk / en); jazyk webu si volí každý v prehliadači
     "HA_URL": "http://homeassistant.local:8123",
     "HA_TOKEN": "",
     "DRY_RUN": "0",
