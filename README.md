@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon-512.png" width="120" alt="Logo"></p>
+
 # Kúrenie AI – smart control for Samsung EHS heat pumps
 
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)

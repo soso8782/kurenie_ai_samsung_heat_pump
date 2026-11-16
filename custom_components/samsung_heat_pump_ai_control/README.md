@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/icon.png" width="120" alt="Logo"></p>
+
 # Samsung Heat Pump AI Control for Home Assistant
 
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
