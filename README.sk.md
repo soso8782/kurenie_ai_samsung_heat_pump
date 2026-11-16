@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/icon-512.png" width="120" alt="Logo"></p>
 
-# Kúrenie AI – inteligentné riadenie tepelného čerpadla Samsung EHS
+# Samsung Heat Pump AI Control – inteligentné riadenie tepelného čerpadla Samsung EHS
 
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
 
@@ -10,7 +10,7 @@ Ak ti projekt šetrí peniaze alebo čas, môžeš ma podporiť kávou cez PayPa
 [![Verzia](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=verzia&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Aktuálna verzia: 2.4.0** (16. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
+**Aktuálna verzia: 2.5.0** (16. 11. 2026) – zoznam zmien v [CHANGELOG.md](CHANGELOG.md).
 
 Domáci systém, ktorý zbiera dáta z tepelného čerpadla **Samsung EHS** (cez NASA zbernicu a ESPHome), počíta skutočnú spotrebu
 a COP, sleduje teploty v izbách a pomocou jazykového modelu (cez [OpenRouter](https://openrouter.ai)) **radí alebo priamo
@@ -111,7 +111,7 @@ Integrácia pre Home Assistant (zariadenie s entitami na sledovanie a ovládanie
 ale vo vlastnom: **[samsung_heat_pump-ai-control-home-assistant-integration](https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration)**.
 
 - Nainštaluj ju cez **HACS → Vlastné repozitáre** s adresou tohto druhého repozitára (nie tohto).
-- Vyžaduje aplikáciu Kúrenie AI **verzie 2.3.0 alebo novšej**.
+- Vyžaduje aplikáciu Samsung Heat Pump AI Control **verzie 2.3.0 alebo novšej**.
 - Kľúč vytvoríš v aplikácii: **Nastavenia → Integrácia do Home Assistanta → Vytvoriť kľúč**.
 
 Podrobný postup je v README integrácie. Senzory pre panel Energia (spotreba, COP) naďalej posiela táto aplikácia cez MQTT (`ha_pub.py`).

@@ -8,7 +8,7 @@
 > **[samsung_heat_pump-ai-control-home-assistant-integration](https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration)**.
 > Add **its** URL to HACS (not the URL of this repository). The copy in this folder may be out of date.
 
-The integration connects Home Assistant to the **Kúrenie AI** web app (an agent for Samsung heat pumps) and creates one device
+The integration connects Home Assistant to the **Samsung Heat Pump AI Control** web app (an agent for Samsung heat pumps) and creates one device
 with entities for monitoring and control. Data is read locally (`local_polling`), by default every 30 s.
 
 The integration does not provide consumption and COP for the Energy dashboard: those stay on the MQTT sensors from `ha_pub.py`.
@@ -23,7 +23,7 @@ The integration does not provide consumption and COP for the Energy dashboard: t
 
 ## Setup
 
-1. In the Kúrenie AI app open Settings, the **Home Assistant integration** card, and click **Create key**.
+1. In the Samsung Heat Pump AI Control app open Settings, the **Home Assistant integration** card, and click **Create key**.
    The key is shown only once, so copy it. The old key stops working once a new one is created, and **Revoke key** disconnects the integration.
 2. In Home Assistant: Settings, Devices & services, Add integration, **Samsung Heat Pump AI Control**.
 3. Enter the app address (e.g. `http://10.10.40.30`) and the key.

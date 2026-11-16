@@ -1,5 +1,5 @@
 # =====================================================================================================
-# Vzorová konfigurácia ESPHome pre aplikáciu Kúrenie AI (Samsung EHS cez NASA zbernicu)
+# Vzorová konfigurácia ESPHome pre aplikáciu Samsung Heat Pump AI Control (Samsung EHS cez NASA zbernicu)
 #
 # Komponent: https://github.com/Beormund/esphome-samsung-nasa  (samsung_nasa)
 # Názvy entít sú nastavené PRESNE podľa predvoleného profilu aplikácie (profil.default()["esp"]),
@@ -57,7 +57,7 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
-# Aplikácia Kúrenie AI číta stav (REST + SSE) a zapisuje nastavenia (POST) práve cez web_server.
+# Aplikácia Samsung Heat Pump AI Control číta stav (REST + SSE) a zapisuje nastavenia (POST) práve cez web_server.
 web_server:
   port: 80
   auth:

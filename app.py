@@ -1136,7 +1136,7 @@ STATIC = {
     "/icon-512.png": "icon-512.png",
     "/icon-maskable-512.png": "icon-maskable-512.png",
 }
-MANIFEST = {"name": "Kúrenie", "short_name": "Kúrenie", "start_url": "/", "scope": "/", "display": "standalone",
+MANIFEST = {"name": "Samsung Heat Pump AI Control", "short_name": "Heat Pump AI", "start_url": "/", "scope": "/", "display": "standalone",
             "background_color": "#0e1115", "theme_color": "#0e1115", "lang": "sk",
             "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
                       {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
@@ -1993,7 +1993,7 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 hl = "sk"
             if hl != "sk":   # názov aplikácie a jazyk PWA podľa jazyka domácnosti (UI_LANG)
-                m.update(name=tr("srv.app.manifest_name", hl), short_name=tr("srv.app.manifest_name", hl), lang=hl)
+                m.update(name=tr("srv.app.manifest_name", hl), short_name=tr("srv.app.manifest_short", hl), lang=hl)
             return self.send(200, json.dumps(m, ensure_ascii=False), "application/manifest+json; charset=utf-8", cache="public, max-age=86400")
         fp = os.path.join(ROOT, "assets", STATIC[path])
         if not os.path.isfile(fp):

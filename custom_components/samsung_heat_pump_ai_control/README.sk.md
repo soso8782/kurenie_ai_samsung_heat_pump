@@ -8,7 +8,7 @@
 > **[samsung_heat_pump-ai-control-home-assistant-integration](https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration)**.
 > Do HACS pridaj **jeho** adresu (nie adresu tohto repozitára). Kópia v tomto priečinku môže byť staršia.
 
-Integrácia pripojí Home Assistant na web aplikáciu **Kúrenie AI** (agent pre tepelné čerpadlo Samsung) a vytvorí jedno zariadenie
+Integrácia pripojí Home Assistant na web aplikáciu **Samsung Heat Pump AI Control** (agent pre tepelné čerpadlo Samsung) a vytvorí jedno zariadenie
 s entitami na sledovanie aj ovládanie. Dáta sa čítajú lokálne (`local_polling`), predvolene každých 30 s.
 
 Spotrebu a COP pre panel Energia integrácia neprináša: tie ostávajú na MQTT senzoroch z `ha_pub.py`.
@@ -23,7 +23,7 @@ Spotrebu a COP pre panel Energia integrácia neprináša: tie ostávajú na MQTT
 
 ## Nastavenie
 
-1. V aplikácii Kúrenie AI otvor Nastavenia, karta **Integrácia Home Assistant**, a daj **Vytvoriť kľúč**.
+1. V aplikácii Samsung Heat Pump AI Control otvor Nastavenia, karta **Integrácia Home Assistant**, a daj **Vytvoriť kľúč**.
    Kľúč sa zobrazí iba raz, skopíruj si ho. Starý kľúč po vytvorení nového prestane platiť, **Zrušiť kľúč** integráciu odpojí.
 2. V Home Assistante: Nastavenia, Zariadenia a služby, Pridať integráciu, **Samsung Heat Pump AI Control**.
 3. Zadaj adresu aplikácie (napr. `http://10.10.40.30`) a kľúč.

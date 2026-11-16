@@ -2,7 +2,7 @@
 """Senzory spotreby a COP tepelného čerpadla do Home Assistant cez MQTT discovery.
 
 Vlákno agenta raz za minútu zoberie živé (kalibrované) hodnoty zo stats.live a pošle ich na MQTT broker z config.env
-(MQTT_HOST…); Home Assistant si z discovery správ sám vytvorí zariadenie „Kúrenie – tepelné čerpadlo“ so senzormi.
+(MQTT_HOST…); Home Assistant si z discovery správ sám vytvorí zariadenie „Samsung Heat Pump AI Control – tepelné čerpadlo“ so senzormi.
 Počítadlo „Spotreba celkom“ len rastie (vhodné do panela Energia): pripočítavajú sa prírastky dennej kalibrovanej spotreby,
 takže zmena kalibračného koeficientu ani polnoc ho nikdy neznížia. Vypnutie: MQTT_PUB=0 v config.env; pri DRY_RUN=1 sa neposiela."""
 import datetime as _dt, json, socket, threading, time, traceback
@@ -20,7 +20,7 @@ EXPIRE_S = 300
 MAX_STEP_KWH = 0.5          # najväčší prírastok počítadla za jeden krok (12 kW × 2,5 min); väčší skok = zmena kalibrácie
 DISC_PREFIX = "homeassistant"
 STATE_TOPIC = "kurenie/tc/state"
-DEVICE = {"identifiers": ["kurenie_tc"], "name": "Kúrenie – tepelné čerpadlo", "manufacturer": "Kúrenie agent",
+DEVICE = {"identifiers": ["kurenie_tc"], "name": "Samsung Heat Pump AI Control – tepelné čerpadlo", "manufacturer": "Samsung Heat Pump AI Control",
           "model": "Výpočet spotreby a COP"}
 # (kľúč, názov, jednotka, device_class, state_class, ikona, desatinné miesta)
 SENSORS = (

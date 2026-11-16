@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""API pre stroje (integrácia Home Assistant „Kúrenie AI“), verzia v1.
+"""API pre stroje (integrácia Home Assistant „Samsung Heat Pump AI Control“), verzia v1.
 
 Modul nemení stav aplikácie sám od seba: poskytuje správu kľúča integrácie (v tabuľke `state` databázy agenta ukladá
 len SHA-256 kľúča), zostavenie stavu `build_state` z výstupu `app.status(cfg)` a overenie/vykonanie akcií.

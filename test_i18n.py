@@ -33,7 +33,7 @@ ALLOW_LITERALS = {
     "št",
 }
 ALLOW_HTML = {
-    "Kúrenie",        # <title> a meta pre PWA: za behu ich prepíše spolocne.nazov_app
+    "Samsung Heat Pump AI Control", "Heat Pump AI",        # <title> a meta pre PWA: za behu ich prepíše spolocne.nazov_app
     "Detská",         # #tgrefnote: názov izby z profilu, nastavuje ho JS
     "detskej izby",   # #abref a #setref: počiatočná hodnota, hneď prepísaná cez refGen2()
 }

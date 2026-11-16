@@ -347,8 +347,8 @@ class Functions(Tmp):
         with mock.patch.object(notify, "event", lambda cfg, kind, title, msg: got.append((kind, title, msg)) or (True, None)):
             notify.target_changed({}, 21.0, 22.5, "ja@x.sk")
             notify.target_changed({"UI_LANG": "en"}, 21.0, 22.5, "ja@x.sk")
-        self.assertEqual(got[0], ("cielova_zmena", "Kúrenie – cieľová teplota", "Cieľová teplota zmenená na 22,5 °C (ja@x.sk)"))
-        self.assertEqual(got[1], ("cielova_zmena", "Heating – target temperature", "Target temperature changed to 22.5 °C (ja@x.sk)"))
+        self.assertEqual(got[0], ("cielova_zmena", "Heat Pump AI – cieľová teplota", "Cieľová teplota zmenená na 22,5 °C (ja@x.sk)"))
+        self.assertEqual(got[1], ("cielova_zmena", "Heat Pump AI – target temperature", "Target temperature changed to 22.5 °C (ja@x.sk)"))
         self.assertEqual(notify.err_text("nenastavené", "en"), "not configured")
         self.assertEqual(notify.err_text("nenastavené", "sk"), "nenastavené")
         self.assertEqual(notify.err_text("iný text", "en"), "iný text")
@@ -371,9 +371,9 @@ class Functions(Tmp):
         finally:
             c.close()
         self.assertEqual(len(sent), 2)
-        self.assertEqual(sent[0][0], "Kúrenie: otvorené okno")
+        self.assertEqual(sent[0][0], "Heat Pump AI: otvorené okno")
         self.assertIn("Vonku je -2,5 °C.", sent[0][1])
-        self.assertEqual(sent[1][0], "Heating: open window")
+        self.assertEqual(sent[1][0], "Heat Pump AI: open window")
         self.assertIn("It is -2.5 °C outside.", sent[1][1])
         self.assertTrue(sent[1][1].startswith("Open window: "))
 
@@ -390,8 +390,8 @@ class Functions(Tmp):
             self.no_sk(d2["name"])
         self.assertEqual(json.loads(sk[0][1])["name"], "Príkon")
         self.assertEqual(json.loads(en[0][1])["name"], "Power")
-        self.assertEqual(json.loads(sk[0][1])["device"]["name"], "Kúrenie – tepelné čerpadlo")
-        self.assertEqual(json.loads(en[0][1])["device"]["name"], "Heating – heat pump")
+        self.assertEqual(json.loads(sk[0][1])["device"]["name"], "Samsung Heat Pump AI Control – tepelné čerpadlo")
+        self.assertEqual(json.loads(en[0][1])["device"]["name"], "Samsung Heat Pump AI Control – heat pump")
 
     def test_dhw_notification_and_tick_texts(self):
         import dhw

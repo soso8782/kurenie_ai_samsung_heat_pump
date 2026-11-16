@@ -18,7 +18,7 @@ self.addEventListener("push", function (event) {
     d = null;
   }
   if (!d || typeof d !== "object") d = {};
-  var title = d.title || "Kúrenie";
+  var title = d.title || "Heat Pump AI";
   var opts = {
     body: d.body || "",
     icon: "/icon-192.png",

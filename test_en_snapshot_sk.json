@@ -73,22 +73,22 @@
   {
    "kind": "agent_zmena",
    "message": "Agent zmenil FSV 4013 Vypnutie kúrenia nad vonk. teplotou: 20.0 → 22.0. Dôvod: Krivka 3 dni pod cieľom",
-   "title": "Kúrenie: agent zmenil nastavenie"
+   "title": "Heat Pump AI: agent zmenil nastavenie"
   },
   {
    "kind": "agent_zmena",
    "message": "Agent zmenil FSV 2031 WL2 voda pri najchladnejšom: 46.0 → 47.0. Dôvod: Krivka 3 dni pod cieľom",
-   "title": "Kúrenie: agent zmenil nastavenie"
+   "title": "Heat Pump AI: agent zmenil nastavenie"
   },
   {
    "kind": "agent_zmena",
    "message": "Agent zmenil FSV 2032 WL2 voda pri najteplejšom: 35.0 → 36.0. Dôvod: Krivka 3 dni pod cieľom",
-   "title": "Kúrenie: agent zmenil nastavenie"
+   "title": "Heat Pump AI: agent zmenil nastavenie"
   },
   {
    "kind": "tyzden",
    "message": "Týždeň bol pokojný. Spotreba klesla.",
-   "title": "Kúrenie: týždenný súhrn"
+   "title": "Heat Pump AI: týždenný súhrn"
   }
  ],
  "results": {
@@ -343,4 +343,4 @@
   ],
   "weekly": true
  }
-}
+}

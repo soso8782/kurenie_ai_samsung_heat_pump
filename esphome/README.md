@@ -2,7 +2,7 @@
 
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
 
-The Kúrenie AI app does not talk to the heat pump directly. It reads it through a small ESP32 module running ESPHome
+The Samsung Heat Pump AI Control app does not talk to the heat pump directly. It reads it through a small ESP32 module running ESPHome
 ([`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa)), which is connected to the
 **NASA** data bus (terminals **F1/F2**) and exposes the entities over the network through `web_server` (REST + SSE).
 

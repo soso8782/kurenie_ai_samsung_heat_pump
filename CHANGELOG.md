@@ -2,6 +2,17 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.5.0] – 2026-11-16
+
+### Zmenené
+- **Nový názov aplikácie: Samsung Heat Pump AI Control** (predtým Kúrenie / Kúrenie AI): titulok webu, PWA (krátky názov
+  na ploche „Heat Pump AI“), upozornenia (predpona „Heat Pump AI:“), zariadenie MQTT v Home Assistante, dokumentácia.
+  ID entít MQTT v HA sa nemenia.
+- Integrácia do Home Assistanta sa volá rovnako, doména `samsung_heat_pump_ai_control`, má vlastné logo (HA 2026.3+).
+
+### Pridané
+- Odkazy na podporu projektu (PayPal, Ko-fi) v päte webu a v README; logo v README.
+
 ## [2.4.0] – 2026-11-16
 
 Úplná angličtina pre anglicky hovoriacich používateľov: s `UI_LANG=en` už web, upozornenia, texty pre Home Assistant
@@ -113,6 +124,7 @@ Prvé verejné vydanie.
 - Plánovač a manuálny ohrev TÚV, zásahy s vyhodnotením.
 - Upozornenia cez Web Push a HA webhook; prihlásenie heslom, Cloudflare Tunnel + Access (JWT), role admin/user.
 
+[2.5.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.5.0
 [2.4.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.4.0
 [2.3.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.3.0
 [2.2.0]: https://github.com/soso8782/samsung_heat_pump-ai-control/releases/tag/v2.2.0

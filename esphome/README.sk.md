@@ -2,7 +2,7 @@
 
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
 
-Aplikácia Kúrenie AI nekomunikuje s tepelným čerpadlom priamo. Číta ho cez malý ESP32 modul s ESPHome
+Aplikácia Samsung Heat Pump AI Control nekomunikuje s tepelným čerpadlom priamo. Číta ho cez malý ESP32 modul s ESPHome
 ([`Beormund/esphome-samsung-nasa`](https://github.com/Beormund/esphome-samsung-nasa)), ktorý je pripojený na
 dátovú zbernicu **NASA** (svorky **F1/F2**) a cez `web_server` (REST + SSE) sprístupňuje entity po sieti.
 

@@ -1,7 +1,7 @@
-# SPEC: integrácia do Home Assistanta „Kúrenie AI“ (verzia 2.3.0, 16. 11. 2026)
+# SPEC: integrácia do Home Assistanta „Samsung Heat Pump AI Control“ (verzia 2.3.0, 16. 11. 2026)
 
 Cieľ: vlastná integrácia (custom component, inštalovateľná cez HACS ako custom repository) `custom_components/kurenie_ai/`,
-ktorá sa pripojí na web aplikácie Kúrenie AI a v HA vytvorí zariadenie s entitami na sledovanie aj ovládanie.
+ktorá sa pripojí na web aplikácie Samsung Heat Pump AI Control a v HA vytvorí zariadenie s entitami na sledovanie aj ovládanie.
 Existujúce MQTT senzory (`ha_pub.py`, spotreba/COP pre Energy panel) ostávajú – integrácia ich neduplikuje
 (spotrebu/COP neobsahuje, len odkaz v README).
 
@@ -39,7 +39,7 @@ Moderný HA (2025+), `DataUpdateCoordinator`, `aiohttp` cez `async_get_clientses
 - **Config flow:** adresa aplikácie (napr. `http://10.10.40.30`) + kľúč integrácie; overenie GET `/api/ha/v1/state`
   (chyby: cannot_connect, invalid_auth); unique_id z adresy. Options flow: interval obnovy (15–300 s, predvolene 30).
   Reauth flow pri 401.
-- **Zariadenie:** jedno „Kúrenie AI – <zariadenie.nazov>“ (manufacturer Samsung, model z `zariadenie.model`, sw_version = verzia aplikácie,
+- **Zariadenie:** jedno „Samsung Heat Pump AI Control – <zariadenie.nazov>“ (manufacturer Samsung, model z `zariadenie.model`, sw_version = verzia aplikácie,
   configuration_url = adresa aplikácie).
 - **Entity** (has_entity_name, translation_key, unique_id = `<entry_id>_<kľúč>`):
   - sensor: vonkajšia teplota, každá izba (teplota, atribút min a referenčná), výstup/spiatočka/cieľ krivky/ΔT vody,
@@ -51,7 +51,7 @@ Moderný HA (2025+), `DataUpdateCoordinator`, `aiohttp` cez `async_get_clientses
   - number: cieľová izbová teplota (min/max z rozsahu aplikácie, krok 0,5) → POST room_target.
   - button: spustiť agenta teraz, ohrev TÚV (ak je TÚV).
 - Po akcii okamžitý refresh koordinátora. Pri chybe akcie `HomeAssistantError` so zrozumiteľnou správou.
-- `hacs.json` v koreni repozitára (`{"name": "Kúrenie AI", "render_readme": true}`) a `custom_components/kurenie_ai/README.md`
+- `hacs.json` v koreni repozitára (`{"name": "Samsung Heat Pump AI Control", "render_readme": true}`) a `custom_components/kurenie_ai/README.md`
   (inštalácia cez HACS custom repository alebo ručne, vytvorenie kľúča v aplikácii, zoznam entít).
 - Testy: `tests_ha/` – unit testy bez Home Assistanta (parsovanie stavu → hodnoty entít, mapovanie akcií); ak sa dá, ľahké
   overenie syntaxe všetkých .py (`python -m py_compile`) a platnosti JSON súborov. HA sa v tomto prostredí nespúšťa.

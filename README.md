@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/icon-512.png" width="120" alt="Logo"></p>
 
-# Kúrenie AI – smart control for Samsung EHS heat pumps
+# Samsung Heat Pump AI Control – smart control for Samsung EHS heat pumps
 
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.md) [![Slovenčina](https://img.shields.io/badge/jazyk-Sloven%C4%8Dina-green.svg)](README.sk.md)
 
@@ -10,7 +10,7 @@ If this project saves you money or time, you can buy me a coffee via PayPal or K
 [![Version](https://img.shields.io/github/v/tag/soso8782/samsung_heat_pump-ai-control?label=version&sort=semver)](https://github.com/soso8782/samsung_heat_pump-ai-control/tags)
 ![Python](https://img.shields.io/badge/python-3.11%2B%20(stdlib)-blue)
 
-**Current version: 2.4.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
+**Current version: 2.5.0** (16 Nov 2026) – see [CHANGELOG.md](CHANGELOG.md) for the list of changes.
 
 A home system that collects data from a **Samsung EHS** heat pump (via the NASA bus and ESPHome), calculates actual energy
 consumption and COP, monitors room temperatures and uses a language model (via [OpenRouter](https://openrouter.ai)) to
@@ -118,7 +118,7 @@ The Home Assistant integration (a device with entities for monitoring and for co
 this repository but in its own: **[samsung_heat_pump-ai-control-home-assistant-integration](https://github.com/soso8782/samsung_heat_pump-ai-control-home-assistant-integration)**.
 
 - Install it through **HACS → Custom repositories** using the URL of that second repository (not this one).
-- It requires Kúrenie AI app **version 2.3.0 or newer**.
+- It requires Samsung Heat Pump AI Control app **version 2.3.0 or newer**.
 - The key is created in the app: **Settings → Home Assistant integration → Create key**.
 
 See the integration's README for the full procedure. Sensors for the Energy dashboard (consumption, COP) are still published
