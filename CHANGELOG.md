@@ -2,6 +2,16 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.9.0] – 2026-11-19
+
+### Pridané
+- **Izbové teploty priamo zo Zigbee2MQTT:** zberač (`collector.py`) sa pripojí na MQTT broker z `config.env` (rovnaké nastavenie
+  ako okamžité kontakty okien) a teplotu izby zapíše hneď po správe teplomera. Párovanie: HA entita izby z profilu
+  `sensor.<slug>_temperature` ↔ z2m meno so slugom `<slug>`. Web ukáže čerstvú hodnotu okamžite (`meta` `live:<izba>`,
+  `app.live_overlay`), bez čakania na cestu HA → ESP → REST (1–3 min). Hodnota z MQTT má 5 min prednosť pred kópiou v ESP;
+  bez MQTT alebo pri výpadku sa číta z ESP ako doteraz. Retained správy sa ignorujú. Regulácia v ESP sa nemení.
+- `test_mqtt_izby.py`.
+
 ## [2.8.0] – 2026-11-16
 
 ### Pridané

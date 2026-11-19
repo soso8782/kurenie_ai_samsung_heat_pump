@@ -265,6 +265,8 @@ def rest_poll():
     while not END or time.time() < END:
         t0 = time.time()
         for n in REST_POLL:
+            if time.time() - mqtt_ts.get(n, 0) < MQTT_ROOM_HOLD:
+                continue          # čerstvá hodnota priamo z MQTT má prednosť pred kópiou v ESP
             try:
                 with urllib.request.urlopen(f"{ESP}/sensor/{urllib.parse.quote(n)}", timeout=5) as r:
                     d = json.loads(r.read().decode("utf-8"))
@@ -273,6 +275,123 @@ def rest_poll():
             except Exception:
                 pass
         time.sleep(max(1.0, 60 - (time.time() - t0)))
+
+
+# --- Izbové teploty priamo zo Zigbee2MQTT (voliteľné: MQTT_HOST v config.env, ako pri okenných kontaktoch) ---
+# Cesta cez HA -> ESP -> REST trvá 1-2 min; správa z MQTT sa zapíše hneď (stav pre ďalšiu vzorku + meta `live:<izba>`,
+# ktorú web ukáže okamžite). Párovanie: HA entita izby `sensor.<slug>_temperature` <-> z2m meno so slugom <slug>.
+MQTT_ROOM_HOLD = 300       # s: po správe z MQTT REST z ESP túto izbu neprepisuje
+MQTT_RECONNECT_S = 600     # s: po tomto čase sa spojenie obnoví (nová konfigurácia, nové párovanie izieb)
+mqtt_ts = {}               # ESP názov izby -> čas poslednej hodnoty z MQTT
+
+
+def mqtt_room_map(p=None):
+    """slug z2m mena -> ESP názov izby (z profilu: izby s `esp` a HA entitou `sensor.<slug>_temperature`)."""
+    if p is None:
+        p = profil.load() if profil is not None else None
+    m = {}
+    for r in (p or {}).get("izby") or []:
+        if not r.get("esp"):
+            continue
+        for e in r.get("ha") or []:
+            if e.startswith("sensor.") and e.endswith("_temperature"):
+                m[e[len("sensor."):-len("_temperature")]] = r["esp"]
+    return m
+
+
+def mqtt_temp(payload):
+    """JSON správa z2m -> teplota (°C) alebo None."""
+    try:
+        d = json.loads(payload.decode("utf-8", "replace"))
+    except ValueError:
+        return None
+    t = d.get("temperature") if isinstance(d, dict) else None
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or not -40 <= t <= 60:
+        return None
+    return float(t)
+
+
+def mqtt_room(c, rmap, base, topic, payload, retain=False, now=None):
+    """Spracuje jednu správu. Vracia ESP názov izby, ak sa zapísala teplota, inak None. Retained správy sa ignorujú (môžu byť staré)."""
+    import contacts_mqtt
+    now = int(now or time.time())
+    if retain or not topic.startswith(base + "/"):
+        return None
+    name = topic[len(base) + 1:]
+    if "/" in name:
+        return None
+    esp = rmap.get(contacts_mqtt.slug(name))
+    t = mqtt_temp(payload) if esp else None
+    if t is None:
+        return None
+    on_state(c, {"name": esp, "domain": "sensor", "value": t, "state": "%.1f °C" % t})
+    mqtt_ts[esp] = now
+    c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", ("live:" + esp, json.dumps({"v": t, "ts": now})))
+    c.commit()
+    return esp
+
+
+def mqtt_rooms_once(cfg, rmap):
+    import socket
+    import contacts_mqtt as cm
+    host, user, pw = cfg.get("MQTT_HOST", "").strip(), cfg.get("MQTT_USER", "").strip(), cfg.get("MQTT_PASS", "")
+    try:
+        port = int(cfg.get("MQTT_PORT") or 1883)
+    except ValueError:
+        port = 1883
+    base = (cfg.get("MQTT_BASE") or "zigbee2mqtt").strip().strip("/")
+    sock = socket.create_connection((host, port), timeout=10)
+    c = db()
+    try:
+        sock.sendall(cm.build_connect("kurenie-izby-%d" % (int(time.time()) % 100000), user, pw))
+        t, _, body = cm.read_packet(sock)
+        if t != 2 or len(body) < 2 or body[1] != 0:
+            raise ConnectionError("broker odmietol pripojenie (kód %s)" % (body[1] if len(body) > 1 else "?"))
+        sock.sendall(cm.build_subscribe(1, base + "/+"))
+        sock.settimeout(cm.READ_TIMEOUT)
+        t0 = last_rx = last_ping = time.time()
+        while (not END or time.time() < END) and time.time() - t0 < MQTT_RECONNECT_S:
+            try:
+                t, flags, body = cm.read_packet(sock)
+                last_rx = time.time()
+                if t == 3:
+                    topic, payload, retain = cm.parse_publish(flags, body)
+                    mqtt_room(c, rmap, base, topic, payload, retain)
+            except socket.timeout:
+                pass
+            now = time.time()
+            if now - last_rx > cm.DEAD_AFTER:
+                raise ConnectionError("broker mlčí")
+            if now - last_ping >= cm.KEEPALIVE / 2:
+                sock.sendall(b"\xc0\x00")
+                last_ping = now
+    finally:
+        try:
+            c.close()
+        finally:
+            sock.close()
+
+
+def mqtt_rooms_loop():
+    """Daemon vlákno. Bez MQTT_HOST alebo bez párovateľných izieb čaká a skúša znova; pri chybe pauza 5 -> 60 s. Heslo sa nevypisuje."""
+    if load_cfg is None or profil is None:
+        return
+    time.sleep(5)
+    delay = 5
+    while not END or time.time() < END:
+        t0 = time.time()
+        try:
+            cfg, rmap = load_cfg(), mqtt_room_map()
+            if not cfg.get("MQTT_HOST", "").strip() or not rmap:
+                time.sleep(60)
+                continue
+            mqtt_rooms_once(cfg, rmap)
+            delay = 5
+            continue
+        except Exception as e:
+            print(time.strftime("%F %T"), "mqtt izby: %s: %s" % (type(e).__name__, str(e)[:120]), flush=True)
+            delay = 5 if time.time() - t0 > 120 else min(60, delay * 2)
+        time.sleep(delay)
 
 
 def snapshots():
@@ -316,4 +435,5 @@ if __name__ == "__main__":
     threading.Thread(target=sampler, daemon=True).start()
     threading.Thread(target=snapshots, daemon=True).start()
     threading.Thread(target=rest_poll, daemon=True).start()
+    threading.Thread(target=mqtt_rooms_loop, name="mqtt-izby", daemon=True).start()
     stream()

@@ -122,6 +122,24 @@ def prevadzka(cfg, now=None):
     return out
 
 
+LIVE_MAX_AGE = 900   # s: izbová teplota priamo z MQTT (meta `live:<izba>` od zberača) sa ukáže, ak je novšia než posledná vzorka
+
+
+def live_overlay(meta, cur, names, ls, now):
+    """Prepíše aktuálne hodnoty izieb čerstvejšími z MQTT (zapisuje collector.mqtt_room). Staršie než vzorka alebo než LIVE_MAX_AGE sa ignorujú."""
+    for k, v in meta.items():
+        if not k.startswith("live:") or k[5:] not in names:
+            continue
+        try:
+            d = json.loads(v)
+            t, ts = float(d["v"]), int(d["ts"])
+        except (ValueError, TypeError, KeyError):
+            continue
+        if ts > ls and now - ts <= LIVE_MAX_AGE:
+            cur[k[5:]] = t
+    return cur
+
+
 def status(cfg, role="admin", email=None, lang="sk"):
     if role != "admin":
         return status_user(cfg, role, email, lang)
@@ -185,7 +203,7 @@ def status(cfg, role="admin", email=None, lang="sk"):
         names = list(S.values()) + list(ALLOWED) + ["Cieľová izbová teplota", "Maximálny posun krivky", TUV_CIEL_ENT]
         rows = tcq(cfg, "SELECT entity, value FROM samples WHERE ts=? AND entity IN (%s)" % ",".join("?" * len(names)),
                    (ls, *names))
-        out["current"] = {e: v for e, v in rows}
+        out["current"] = live_overlay(meta, {e: v for e, v in rows}, names, ls, now)
     except Exception as e:
         out["collector_error"] = str(e)
     out["stats"] = stats_brief(cfg, lang)
@@ -238,10 +256,11 @@ def status_user(cfg, role, email, lang="sk"):
     out["prevadzka"] = prevadzka(cfg, now)
     out["current"] = {}
     try:
-        ls = int(dict(tcq(cfg, "SELECT k, v FROM meta")).get("last_sample") or 0)
+        meta = dict(tcq(cfg, "SELECT k, v FROM meta"))
+        ls = int(meta.get("last_sample") or 0)
         names = [S[k] for k in ROOM_KEYS] + [x for x in (S.get("ciel"), ROOM_TARGET_ENT, S.get("bojler"), TUV_CIEL_ENT) if x]
         rows = tcq(cfg, "SELECT entity, value FROM samples WHERE ts=? AND entity IN (%s)" % ",".join("?" * len(names)), (ls, *names))
-        out["current"] = {e: v for e, v in rows}
+        out["current"] = live_overlay(meta, {e: v for e, v in rows}, names, ls, now)
     except Exception as e:
         out["collector_error"] = tr("srv.app.teploty_zberac", lang)
     return out
