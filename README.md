@@ -135,7 +135,9 @@ agent a message. **Heat pump settings cannot be changed through MCP** – the ag
 - Claude Desktop: in `claude_desktop_config.json` through the `mcp-remote` bridge
   (`"command": "npx", "args": ["mcp-remote", "http://<app-address>/mcp", "--allow-http", "--header", "Authorization: Bearer <key>"]`).
 - Tools: `stav`, `den`, `dni`, `spotreba`, `zasahy`, `spravy`, `beh_agenta` (read-only) and `poslat_spravu`.
-- Through the Cloudflare tunnel with Access login, MCP does not work without extra setup (Access would block the request) – use it on the home network.
+- Through the Cloudflare tunnel with Access login, the `/mcp` path needs an exception: in Zero Trust → Access → Applications add
+  a self-hosted application with the domain `<hostname>/mcp` and a **Bypass** policy (Everyone). The rest of the site stays behind
+  Access, `/mcp` is protected by the app's key. Then `https://<hostname>/mcp` works too (no `--allow-http` in mcp-remote).
 
 ## Safety and limits
 

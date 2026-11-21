@@ -127,7 +127,9 @@ správu. **Nastavenia tepelného čerpadla cez MCP meniť nejde** – požiadavk
 - Claude Desktop: v `claude_desktop_config.json` cez most `mcp-remote`
   (`"command": "npx", "args": ["mcp-remote", "http://<adresa-aplikácie>/mcp", "--allow-http", "--header", "Authorization: Bearer <kľúč>"]`).
 - Nástroje: `stav`, `den`, `dni`, `spotreba`, `zasahy`, `spravy`, `beh_agenta` (len čítanie) a `poslat_spravu`.
-- Cez Cloudflare tunel s Access prihlásením MCP bez ďalšieho nastavenia nefunguje (Access by požiadavku zastavil) – používaj ho v domácej sieti.
+- Cez Cloudflare tunel s Access prihlásením treba pre cestu `/mcp` výnimku: v Zero Trust → Access → Applications pridaj
+  self-hosted aplikáciu s doménou `<hostname>/mcp` a politikou **Bypass** (Everyone). Zvyšok webu ostane za Access,
+  `/mcp` chráni kľúč aplikácie. Potom funguje aj `https://<hostname>/mcp` (bez `--allow-http` v mcp-remote).
 
 ## Bezpečnosť a mantinely
 
