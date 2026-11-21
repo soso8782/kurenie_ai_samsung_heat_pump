@@ -124,6 +124,19 @@ this repository but in its own: **[samsung_heat_pump-ai-control-home-assistant-i
 See the integration's README for the full procedure. Sensors for the Energy dashboard (consumption, COP) are still published
 by this app via MQTT (`ha_pub.py`).
 
+## MCP server for Claude
+
+The app has a built-in **MCP server** (Model Context Protocol) at `http://<app-address>/mcp`. Through it, Claude can ask for
+the current state, single days (hour by hour), daily summaries, consumption, interventions and agent runs, and can send the
+agent a message. **Heat pump settings cannot be changed through MCP** – the agent judges any request within its limits.
+
+- Create the key in the app: **Settings → MCP server for Claude → Create key** (or on the server: `python3 mcp_api.py --novy-kluc`).
+- Claude Code: `claude mcp add --transport http kurenie http://<app-address>/mcp --header "Authorization: Bearer <key>"`
+- Claude Desktop: in `claude_desktop_config.json` through the `mcp-remote` bridge
+  (`"command": "npx", "args": ["mcp-remote", "http://<app-address>/mcp", "--allow-http", "--header", "Authorization: Bearer <key>"]`).
+- Tools: `stav`, `den`, `dni`, `spotreba`, `zasahy`, `spravy`, `beh_agenta` (read-only) and `poslat_spravu`.
+- Through the Cloudflare tunnel with Access login, MCP does not work without extra setup (Access would block the request) – use it on the home network.
+
 ## Safety and limits
 
 - The agent may only change settings from the `ALLOWED` list in `agent.py` (e.g. FSV 2031 42–50 °C, FSV 2032 32–38 °C, FSV 4013,

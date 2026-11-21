@@ -116,6 +116,19 @@ ale vo vlastnom: **[samsung_heat_pump-ai-control-home-assistant-integration](htt
 
 Podrobný postup je v README integrácie. Senzory pre panel Energia (spotreba, COP) naďalej posiela táto aplikácia cez MQTT (`ha_pub.py`).
 
+## MCP server pre Claude
+
+Aplikácia má vstavaný **MCP server** (Model Context Protocol) na adrese `http://<adresa-aplikácie>/mcp`. Claude sa cez neho
+pýta na aktuálny stav, jednotlivé dni (hodina po hodine), denné súhrny, spotrebu, zásahy a behy agenta a môže agentovi poslať
+správu. **Nastavenia tepelného čerpadla cez MCP meniť nejde** – požiadavku posúdi agent v rámci svojich mantinelov.
+
+- Kľúč vytvoríš v aplikácii: **Nastavenia → MCP server pre Claude → Vytvoriť kľúč** (alebo na serveri `python3 mcp_api.py --novy-kluc`).
+- Claude Code: `claude mcp add --transport http kurenie http://<adresa-aplikácie>/mcp --header "Authorization: Bearer <kľúč>"`
+- Claude Desktop: v `claude_desktop_config.json` cez most `mcp-remote`
+  (`"command": "npx", "args": ["mcp-remote", "http://<adresa-aplikácie>/mcp", "--allow-http", "--header", "Authorization: Bearer <kľúč>"]`).
+- Nástroje: `stav`, `den`, `dni`, `spotreba`, `zasahy`, `spravy`, `beh_agenta` (len čítanie) a `poslat_spravu`.
+- Cez Cloudflare tunel s Access prihlásením MCP bez ďalšieho nastavenia nefunguje (Access by požiadavku zastavil) – používaj ho v domácej sieti.
+
 ## Bezpečnosť a mantinely
 
 - Agent smie meniť len nastavenia zo zoznamu `ALLOWED` v `agent.py` (napr. FSV 2031 42–50 °C, FSV 2032 32–38 °C, FSV 4013,

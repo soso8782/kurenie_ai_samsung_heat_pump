@@ -971,6 +971,19 @@ body.role-user #pushpanel .pushbox{margin-top:10px}
       <span id="haintmsg" class="sub" role="status"></span>
     </section>
 
+    <section class="panel pad sgroup" id="mcpsettings">
+      <h3 data-i18n="nastavenia.mcp_titul">MCP server pre Claude</h3>
+      <div class="hastat"><span class="dot" id="mcpdot"></span><span id="mcpstat"></span></div>
+      <p class="sub" data-i18n="nastavenia.mcp_popis">Claude (Claude Code, Claude Desktop) sa cez MCP pýta aplikácie na stav, dni, spotrebu, zásahy a behy agenta a môže agentovi poslať správu. Nastavenia čerpadla cez MCP meniť nejde. V Claude pridaj vzdialený MCP server s touto adresou a hlavičkou Authorization: „Bearer“, medzera a kľúč.</p>
+      <div class="sub"><span data-i18n="nastavenia.mcp_adresa">Adresa MCP servera:</span> <code id="mcpaddr"></code></div>
+      <div id="mcpkeybox" hidden style="margin-top:10px">
+        <label for="mcpkey" data-i18n="nastavenia.haint_novy">Nový kľúč (zobrazí sa len teraz – skopíruj ho):</label>
+        <div class="inrow"><input type="text" id="mcpkey" readonly spellcheck="false"><button type="button" class="btn" id="mcpcopy" data-i18n="nastavenia.haint_kopirovat">Kopírovať</button></div>
+      </div>
+      <div class="btnrow"><button class="btn primary" type="button" id="mcpnew" data-i18n="nastavenia.haint_vytvorit">Vytvoriť kľúč</button><button class="btn" type="button" id="mcprevoke" data-i18n="nastavenia.haint_zrusit">Zrušiť kľúč</button></div>
+      <span id="mcpmsg" class="sub" role="status"></span>
+    </section>
+
     <section class="panel pad sgroup" id="mqsettings">
       <h3 data-i18n="nastavenia.mqtt_titul">MQTT (okná priamo zo Zigbee2MQTT)</h3>
       <div class="hastat"><span class="dot grey" id="mqdot"></span><span id="mqstat" data-i18n="spolocne.nacitavam_m">načítavam…</span></div>
@@ -2442,7 +2455,7 @@ async function loadStatus() {
   if (!document.querySelector("#last .undoask")) $("#last").innerHTML = s.last_run ? runHtml(s.last_run, false, true) : `<div class="empty">${t("agent.zatial_nebezal")}</div>`;
   renderSettingsStatus(s);
   abPill(s.abtest);
-  renderSeason(s); renderHa(s.ha); renderHaInt(s.ha_api); renderTunnel(s.tunnel); renderBadges(s);
+  renderSeason(s); renderHa(s.ha); renderHaInt(s.ha_api); renderMcp(s.mcp); renderTunnel(s.tunnel); renderBadges(s);
   const bal = s.balance, cr = $("#credit");
   if (bal && bal.left != null) {
     const perDay = s.avg_cost ? s.avg_cost * (1440 / (s.interval || 60)) + 0.002 : null, days = perDay ? Math.floor(Math.max(0, bal.left) / perDay) : null;
@@ -3202,6 +3215,29 @@ function haView(h) {
   return {cls: "bad", text: t("nastavenia.ha_chyba", {v: h.error || t("spolocne.ha_neodpoveda")}), short: t("nastavenia.ha_chyba_spojenia"), tip: h.error || t("spolocne.ha_neodpoveda")};
 }
 /* integrácia Home Assistant: kľúč pre custom component samsung_heat_pump_ai_control (v DB len odtlačok; nový kľúč sa ukáže raz) */
+function renderMcp(info) {
+  const st = $("#mcpstat"); if (!st) return;
+  const set = !!(info && info.set);
+  $("#mcpdot").className = "dot " + (set ? "ok" : "");
+  st.textContent = set ? t("nastavenia.mcp_nastaveny", {d: info.created ? new Date(info.created * 1000).toLocaleString(LOCALE) : "–"}) : t("nastavenia.mcp_nenastaveny");
+  $("#mcprevoke").hidden = !set;
+  $("#mcpaddr").textContent = location.origin + ((info && info.path) || "/mcp");
+}
+$("#mcpnew").onclick = guard(async () => {
+  if (statusData?.mcp?.set && !confirm(t("nastavenia.mcp_potvrd_novy"))) return;
+  const r = await api("api/mcp_key", {});
+  if (r.error || !r.key) return say("#mcpmsg", r.error || t("spolocne.neznama_chyba"), false);
+  $("#mcpkey").value = r.key; $("#mcpkeybox").hidden = false; renderMcp(r.info);
+  say("#mcpmsg", t("nastavenia.mcp_vytvoreny"), true);
+}, "#mcpmsg");
+$("#mcpcopy").onclick = async () => { const i = $("#mcpkey"); i.select();
+  try { await navigator.clipboard.writeText(i.value); say("#mcpmsg", t("nastavenia.haint_skopirovany"), true); } catch (e) { document.execCommand && document.execCommand("copy"); } };
+$("#mcprevoke").onclick = guard(async () => {
+  if (!confirm(t("nastavenia.mcp_potvrd_zrusit"))) return;
+  const r = await api("api/mcp_key_revoke", {});
+  if (r.error) return say("#mcpmsg", r.error, false);
+  $("#mcpkeybox").hidden = true; $("#mcpkey").value = ""; renderMcp(r.info); say("#mcpmsg", t("nastavenia.mcp_zruseny"), true);
+}, "#mcpmsg");
 function renderHaInt(info) {
   const st = $("#haintstat"); if (!st) return;
   const set = !!(info && info.set);

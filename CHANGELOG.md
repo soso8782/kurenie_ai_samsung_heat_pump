@@ -2,6 +2,14 @@
 
 Formát podľa [Keep a Changelog](https://keepachangelog.com/sk/1.1.0/), čísla verzií podľa [Semantic Versioning](https://semver.org/).
 
+## [2.10.0] – 2026-11-21
+
+### Pridané
+- **MCP server pre Claude** (`mcp_api.py`, `POST /mcp`, Streamable HTTP s JSON odpoveďami): nástroje `stav`, `den`
+  (hodina po hodine, voliteľne udalosti), `dni`, `spotreba`, `zasahy`, `spravy`, `beh_agenta` a `poslat_spravu` (správa
+  agentovi, označená „[MCP]“). Nastavenia čerpadla cez MCP meniť nejde. Vlastný kľúč (`Authorization: Bearer`, v DB len SHA-256)
+  v Nastaveniach → „MCP server pre Claude“ alebo `python3 mcp_api.py --novy-kluc`. `test_mcp_api.py`.
+
 ## [2.9.0] – 2026-11-19
 
 ### Pridané

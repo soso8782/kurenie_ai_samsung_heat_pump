@@ -11,7 +11,7 @@ from common import (REF_ROOM, ROOM_NAMES, ROOMS, ROOT, S, TARGET_ROOMS, adb, bal
                     hour_stats, is_dry, load_cfg, local_midnight, save_cfg, set_state, tcq, cfg_int)
 from agent import ALLOWED, ROOM_TARGET_ENT, UNDO_MAX_AGE_S, call_llm, chat_reply, parse_room_target, set_room_target, undo, update_days
 import agent as _agent_mod
-import abtest, ha_api, ha_auth, cfjwt, cftunnel, contacts, contacts_mqtt, dhw, interventions, notify, spotreba, temps, vonku
+import abtest, ha_api, ha_auth, cfjwt, cftunnel, contacts, contacts_mqtt, dhw, interventions, mcp_api, notify, spotreba, temps, vonku
 try:   # štatistiky (stats.py): ak modul chýba, web ostane funkčný a /api/stats/* vráti 503
     import stats
 except Exception:
@@ -213,6 +213,7 @@ def status(cfg, role="admin", email=None, lang="sk"):
         ca = adb(cfg)
         try:
             out["ha_api"] = ha_api.key_info(ca)
+            out["mcp"] = mcp_api.key_info(ca)
         finally:
             ca.close()
     except Exception:
@@ -1675,6 +1676,8 @@ class H(BaseHTTPRequestHandler):
                 return self.static_icon(u.path)
             if u.path == "/sw.js":   # service worker pre Web Push: bez prihlásenia, scope celý web
                 return self.static_sw()
+            if u.path == mcp_api.PATH:   # MCP: len POST (JSON odpovede, bez SSE streamu)
+                return self.send(405, {"error": "method not allowed"}, headers=[("Allow", "POST")])
             if not u.path.startswith("/api/"):
                 return self.send(404, {"error": "not found"})
             if u.path == ha_api.PATH_STATE:   # integrácia Home Assistant: vlastný kľúč (Authorization: Bearer)
@@ -1813,6 +1816,16 @@ class H(BaseHTTPRequestHandler):
                 if not self.ha_api_ok(cfg):
                     return self.send(401, {"error": "unauthorized"})
                 return self.send(*ha_api.dispatch(cfg, u.path, body, sys.modules[__name__]))
+            if u.path == mcp_api.PATH:   # MCP server pre Clauda: vlastný kľúč (Authorization: Bearer), bez cookie / X-Kurenie
+                c = adb(cfg)
+                try:
+                    ok = mcp_api.check(c, self.headers.get("Authorization"))
+                finally:
+                    c.close()
+                if not ok:
+                    return self.send(401, {"error": "unauthorized"}, headers=[("WWW-Authenticate", "Bearer")])
+                code, out = mcp_api.handle(cfg, body, sys.modules[__name__])
+                return self.send(code, b"" if out is None else out)
             # jednoduchá ochrana pred cudzou stránkou: požiadavka musí prísť z tejto stránky
             if self.headers.get("X-Kurenie") != "1":
                 return self.send(403, {"error": "forbidden"})
@@ -1833,6 +1846,15 @@ class H(BaseHTTPRequestHandler):
             role, email = ident
             if role != "admin" and u.path not in USER_POST:   # centrálna kontrola oprávnení pre rolu `user`
                 return self.send(403, {"error": tr("srv.app.no_perm", lang)})
+            if u.path in ("/api/mcp_key", "/api/mcp_key_revoke"):   # kľúč MCP servera (len správca)
+                c = adb(cfg)
+                try:
+                    if u.path == "/api/mcp_key":
+                        return self.send(200, {"ok": True, "key": mcp_api.new_key(c), "info": mcp_api.key_info(c)})
+                    mcp_api.revoke(c)
+                    return self.send(200, {"ok": True, "info": mcp_api.key_info(c)})
+                finally:
+                    c.close()
             if u.path in ("/api/ha_key", "/api/ha_key_revoke"):   # kľúč integrácie Home Assistant (len správca)
                 c = adb(cfg)
                 try:
